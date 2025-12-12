@@ -1,0 +1,25 @@
+{
+  "name": "automation_booking",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "heal:gemini": "node gemini-healer.js",
+    "heal:gemini:auto": "node gemini-healer.js --auto-fix",
+    "heal:gemini:verbose": "node gemini-healer.js --auto-fix --verbose",
+    "test:debug": "playwright test --debug --headed"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@google/generative-ai": "^0.3.1",
+    "@playwright/test": "^1.56.1",
+    "@types/node": "^24.10.1"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.3"
+  }
+}
