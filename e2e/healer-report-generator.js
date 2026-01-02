@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 
 /**
- * Gemini Healer - HTML Report Generator
- * Generates professional HTML reports for test healing sessions
+ * Gemini Healer - HTML Report Generator (Enhanced)
+ * Generates professional HTML reports with improved styling and interactivity
+ * Color Scheme: Navy Blue (#1e3a8a), Green (#10b981), Grey (#6b7280)
  */
 
 import fs from 'fs';
@@ -12,6 +13,7 @@ import path from 'path';
  * Helper function to escape HTML special characters
  */
 function escapeHtmlNode(text) {
+  if (!text) return '';
   return text
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -21,10 +23,50 @@ function escapeHtmlNode(text) {
 }
 
 /**
+ * Format code with line numbers - simplified and truncated
+ */
+function formatCodeWithLineNumbers(code, type = 'error', maxLines = 8) {
+  if (!code) return '<span style="color: #6b7280;">No content available</span>';
+  
+  const lines = code.split('\n').slice(0, maxLines);
+  const totalLines = code.split('\n').length;
+  const hasMore = totalLines > maxLines;
+  const lineNumWidth = Math.max(2, totalLines.toString().length);
+  
+  let html = lines.map((line, idx) => {
+    const lineNum = idx + 1;
+    const paddedNum = lineNum.toString().padStart(lineNumWidth, ' ');
+    const escapedLine = escapeHtmlNode(line || ' ');
+    
+    let highlighted = escapedLine;
+    
+    if (type === 'error') {
+      highlighted = escapedLine
+        .replace(/\b(Error|TypeError|AssertionError|ReferenceError|FAIL)\b/g, '<span class="error-kw">$1</span>')
+        .replace(/\b(timeout|Timeout|TIMEOUT|failed|Failed)\b/g, '<span class="error-warn">$1</span>')
+        .replace(/\b(at|in|near)\b/g, '<span class="error-prep">$1</span>');
+    } else if (type === 'fix') {
+      highlighted = escapedLine
+        .replace(/\b(test|it|describe|expect|async|await)\b/g, '<span class="fix-keyword">$1</span>')
+        .replace(/\b(page\.|locator|click|fill|type|goto|navigate|waitFor)\b/g, '<span class="fix-action">$1</span>')
+        .replace(/\b(const|let|var|function|return|if|else|for|while)\b/g, '<span class="fix-syntax">$1</span>')
+        .replace(/('.*?'|".*?"|`.*?`)/g, '<span class="fix-string">$1</span>');
+    }
+    
+    return `<div class="code-line"><span class="line-num">${paddedNum}</span><span class="code-text">${highlighted}</span></div>`;
+  }).join('');
+  
+  if (hasMore) {
+    html += `<div class="code-truncated">... ${totalLines - maxLines} more lines</div>`;
+  }
+  
+  return html;
+}
+
+/**
  * Generate HTML report for healer session
  */
 function generateHtmlReport(healingResults) {
-  const timestamp = new Date().toISOString();
   const reportDir = path.join(process.cwd(), 'test-results');
   
   // Ensure directory exists
@@ -39,31 +81,51 @@ function generateHtmlReport(healingResults) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gemini Healer Report</title>
     <style>
+        :root {
+            --navy: #1e3a8a;
+            --green: #10b981;
+            --grey: #6b7280;
+            --grey-light: #f3f4f6;
+            --grey-border: #e5e7eb;
+            --white: #ffffff;
+            --text-primary: #1f2937;
+            --text-secondary: #6b7280;
+            --bg-error: #fee2e2;
+            --border-error: #fecaca;
+            --bg-success: #d1fae5;
+            --border-success: #a7f3d0;
+        }
+
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
         }
+
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
+            background: linear-gradient(135deg, #0d9488 0%, #14b8a6 100%);
             min-height: 100vh;
             padding: 20px;
+            color: var(--text-primary);
         }
+
         .container {
             max-width: 1200px;
             margin: 0 auto;
-            background: white;
-            border-radius: 10px;
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+            background: #1e3a8a;
+            border-radius: 8px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
             overflow: hidden;
         }
+
         .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 30px;
+            background: linear-gradient(135deg, #1e3a8a 0%, #0f172a 100%);
+            color: var(--white);
+            padding: 40px 30px;
             text-align: center;
         }
+
         .header h1 {
             font-size: 2.5em;
             margin-bottom: 10px;
@@ -72,240 +134,464 @@ function generateHtmlReport(healingResults) {
             justify-content: center;
             gap: 15px;
         }
+
         .header p {
-            font-size: 1.1em;
-            opacity: 0.9;
+            font-size: 1em;
+            opacity: 0.95;
         }
+
         .content {
-            padding: 30px;
+            padding: 40px;
+            background: var(--white);
         }
+
         .summary {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
             gap: 20px;
-            margin-bottom: 30px;
+            margin-bottom: 40px;
         }
+
         .stat-card {
-            background: #f8f9fa;
-            border-left: 5px solid #667eea;
-            padding: 20px;
-            border-radius: 5px;
+            background: var(--grey-light);
+            border-left: 5px solid var(--navy);
+            padding: 25px;
+            border-radius: 6px;
             text-align: center;
+            transition: transform 0.2s, box-shadow 0.2s;
         }
+
+        .stat-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(30, 58, 138, 0.1);
+        }
+
         .stat-card h3 {
-            color: #667eea;
+            color: var(--navy);
             font-size: 2.5em;
             margin: 10px 0;
         }
+
         .stat-card p {
-            color: #666;
-            font-size: 0.95em;
+            color: var(--text-secondary);
+            font-size: 0.9em;
+            font-weight: 500;
         }
+
+        .stat-card.success {
+            border-left-color: var(--green);
+        }
+
+        .stat-card.success h3 {
+            color: var(--green);
+        }
+
         .results {
             margin-bottom: 30px;
+            background: var(--white);
+            padding: 20px;
+            border-radius: 6px;
         }
+
         .results h2 {
-            color: #333;
-            margin-bottom: 20px;
+            color: var(--navy);
+            margin-bottom: 25px;
             font-size: 1.8em;
-            border-bottom: 2px solid #667eea;
-            padding-bottom: 10px;
+            border-bottom: 3px solid var(--navy);
+            padding-bottom: 12px;
         }
+
         .test-result {
-            background: #f8f9fa;
-            border: 1px solid #e0e0e0;
-            border-radius: 5px;
+            background: var(--white);
+            border: 1px solid var(--grey-border);
+            border-radius: 6px;
             margin-bottom: 15px;
             overflow: hidden;
+            transition: box-shadow 0.2s;
         }
+
+        .test-result:hover {
+            box-shadow: 0 4px 12px rgba(30, 58, 138, 0.08);
+        }
+
         .test-result.success {
-            border-left: 5px solid #28a745;
-            background: #f0f8f5;
+            border-left: 5px solid var(--green);
         }
+
         .test-result.failed {
-            border-left: 5px solid #dc3545;
-            background: #fdf8f7;
+            border-left: 5px solid #ef4444;
         }
+
         .test-header {
-            background: #f0f0f0;
+            background: var(--grey-light);
+            padding: 18px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-weight: 600;
+            user-select: none;
+            transition: background 0.2s;
+        }
+
+        .test-header:hover {
+            background: #e5e7eb;
+        }
+
+        .test-result.success .test-header {
+            background: #f0fdf4;
+        }
+
+        .test-result.failed .test-header {
+            background: #fef2f2;
+        }
+
+        .test-content {
+            padding: 25px;
+            display: none;
+            border-top: 1px solid var(--grey-border);
+        }
+
+        .test-result.expanded .test-content {
+            display: block;
+            animation: slideDown 0.3s ease-out;
+        }
+
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .test-title {
+            color: var(--text-primary);
+            font-weight: 600;
+            flex: 1;
+        }
+
+        .expand-icon {
+            font-size: 1.2em;
+            transition: transform 0.3s;
+            color: var(--navy);
+        }
+
+        .test-result.expanded .expand-icon {
+            transform: rotate(90deg);
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            font-weight: 600;
+            margin-right: 15px;
+        }
+
+        .status-badge.success {
+            background: var(--bg-success);
+            color: #047857;
+        }
+
+        .status-badge.failed {
+            background: var(--bg-error);
+            color: #991b1b;
+        }
+
+        .status-badge.warning {
+            background: #fef3c7;
+            color: #92400e;
+        }
+
+        .subsection {
+            margin: 15px 0;
+            border: 1px solid var(--grey-border);
+            border-radius: 6px;
+            overflow: hidden;
+        }
+
+        .subsection-header {
+            background: var(--grey-light);
             padding: 15px;
             cursor: pointer;
             display: flex;
             justify-content: space-between;
             align-items: center;
             font-weight: 600;
+            user-select: none;
+            transition: background 0.2s;
         }
-        .test-result.success .test-header {
-            background: #e8f5e9;
+
+        .subsection-header:hover {
+            background: #e5e7eb;
         }
-        .test-result.failed .test-header {
-            background: #ffebee;
-        }
-        .test-content {
+
+        .subsection-content {
             padding: 15px;
             display: none;
+            border-top: 1px solid var(--grey-border);
+            max-height: 600px;
+            min-height: 150px;
+            overflow: auto;
+            resize: both;
+            word-break: break-word;
+            white-space: pre-wrap;
+            background: #f9fafb;
         }
-        .test-result.expanded .test-content {
+
+        .subsection.expanded .subsection-content {
             display: block;
+            animation: slideDown 0.3s ease-out;
         }
-        .alignment-flow {
-            display: grid;
-            grid-template-columns: 1fr auto 1fr auto 1fr;
-            gap: 10px;
-            align-items: start;
-            margin: 20px 0;
+
+        .subsection-icon {
+            font-size: 1.1em;
+            transition: transform 0.3s;
+            margin-right: 10px;
+            color: var(--navy);
         }
-        .flow-section {
-            background: #f8f9fa;
-            border: 2px solid #e0e0e0;
-            border-radius: 5px;
-            padding: 12px;
-        }
-        .flow-section.error {
-            background: #fff5f5;
-            border-color: #ffcccc;
-        }
-        .flow-section.analysis {
-            background: #f0f4ff;
-            border-color: #cce0ff;
-        }
-        .flow-section.fix {
-            background: #f0f8f5;
-            border-color: #c3e6cb;
-        }
-        .flow-arrow {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 1.5em;
-            color: #667eea;
-            font-weight: bold;
-        }
-        .flow-title {
-            font-size: 0.85em;
-            font-weight: 600;
-            margin-bottom: 8px;
-            display: flex;
-            align-items: center;
-            gap: 5px;
-        }
-        .flow-content {
-            font-size: 0.85em;
-            line-height: 1.4;
-            color: #333;
-            max-height: 150px;
-            overflow-y: auto;
-        }
-        .error-section {
-            margin: 15px 0;
-        }
-        .error-section h4 {
-            color: #dc3545;
-            margin-bottom: 10px;
-            font-weight: 600;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        .error-text {
-            background: white;
-            border: 1px solid #ffcccc;
-            border-radius: 3px;
-            padding: 10px;
-            font-family: 'Courier New', monospace;
-            font-size: 0.9em;
-            overflow-x: auto;
-            color: #666;
-        }
-        .analysis-section {
-            margin: 15px 0;
-        }
-        .analysis-section h4 {
-            color: #0056b3;
-            margin-bottom: 10px;
-            font-weight: 600;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        .analysis-text {
-            background: white;
-            border: 1px solid #cce0ff;
-            border-radius: 3px;
-            padding: 10px;
-            font-size: 0.9em;
-            color: #333;
-            line-height: 1.5;
-        }
-        .fix-section {
-            margin: 15px 0;
-        }
-        .fix-section h4 {
-            color: #28a745;
-            margin-bottom: 10px;
-            font-weight: 600;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        .fix-text {
-            background: #f5f5f5;
-            border: 1px solid #c3e6cb;
-            border-radius: 3px;
-            padding: 10px;
-            font-family: 'Courier New', monospace;
-            font-size: 0.9em;
-            overflow-x: auto;
-            color: #333;
-        }
-        .connection-line {
-            text-align: center;
-            color: #999;
-            font-size: 0.8em;
-            margin: 5px 0;
-        }
-        .status-badge {
-            display: inline-block;
-            padding: 5px 10px;
-            border-radius: 20px;
-            font-size: 0.9em;
-            font-weight: 600;
-        }
-        .status-badge.success {
-            background: #d4edda;
-            color: #155724;
-        }
-        .status-badge.failed {
-            background: #f8d7da;
-            color: #721c24;
-        }
-        .status-badge.warning {
-            background: #fff3cd;
-            color: #856404;
-        }
-        .expand-icon {
-            font-size: 1.2em;
-            transition: transform 0.2s;
-        }
-        .test-result.expanded .expand-icon {
+
+        .subsection.expanded .subsection-icon {
             transform: rotate(90deg);
         }
-        .footer {
-            background: #f8f9fa;
-            border-top: 1px solid #e0e0e0;
-            padding: 20px 30px;
+
+        .error-text, .analysis-text, .fix-text {
+            background: var(--grey-light);
+            border: 1px solid var(--grey-border);
+            border-radius: 6px;
+            padding: 12px 15px;
+            font-family: 'Courier New', 'Monaco', 'Menlo', monospace;
+            font-size: 0.9em;
+            color: var(--text-primary);
+            line-height: 1.8;
+            max-height: 500px;
+            overflow-y: auto;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            word-break: break-word;
+            resize: both;
+        }
+
+        .error-text {
+            background: var(--bg-error);
+            border-color: var(--border-error);
+        }
+
+        .fix-text {
+            background: var(--bg-success);
+            border-color: var(--border-success);
+        }
+
+        .suite-group {
+            margin-bottom: 30px;
+            border: 2px solid #0d9488;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .suite-header {
+            background: linear-gradient(135deg, #0d9488 0%, #14b8a6 100%);
+            color: var(--white);
+            padding: 15px 20px;
+            font-weight: 600;
+            font-size: 1.1em;
+        }
+
+        .suite-tests {
+            padding: 15px;
+        }
+
+        .test-item-line {
+            padding: 8px 0;
+            border-bottom: 1px solid var(--grey-border);
+            font-size: 0.95em;
+            line-height: 1.6;
+        }
+
+        .test-item-line:last-child {
+            border-bottom: none;
+        }
+
+        .test-item-bullet {
+            display: flex;
+            padding: 10px 0;
+            border-bottom: 1px solid var(--grey-border);
+        }
+
+        .test-item-bullet:last-child {
+            border-bottom: none;
+        }
+
+        .bullet-point {
+            margin-right: 12px;
+            color: #0d9488;
+            font-weight: bold;
+            min-width: 20px;
+        }
+
+        .bullet-content {
+            flex: 1;
+            word-break: break-word;
+        }
+
+        .code-line {
+            display: flex;
+            padding: 2px 0;
+            border-left: 3px solid transparent;
+            margin: 0;
+            align-items: flex-start;
+        }
+
+        .error-text .code-line {
+            border-left-color: #fca5a5;
+        }
+
+        .fix-text .code-line {
+            border-left-color: #6ee7b7;
+        }
+
+        .line-num {
+            color: var(--grey);
+            display: inline-block;
+            min-width: 40px;
+            text-align: right;
+            margin-right: 12px;
+            font-size: 0.85em;
+            flex-shrink: 0;
+            font-weight: 500;
+            font-family: 'Courier New', 'Monaco', 'Menlo', monospace;
+            user-select: none;
+        }
+
+        .code-text {
+            flex: 1;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            word-break: break-word;
+            font-family: 'Courier New', 'Monaco', 'Menlo', monospace;
+        }
+
+        .code-truncated {
+            padding: 8px 0;
+            color: var(--grey);
+            font-style: italic;
+            font-size: 0.8em;
             text-align: center;
-            color: #666;
+            border-top: 1px dashed var(--grey-border);
+            margin-top: 4px;
+        }
+
+        /* Syntax highlighting classes */
+        .error-kw {
+            color: #991b1b;
+            font-weight: bold;
+        }
+
+        .error-warn {
+            color: #dc2626;
+            font-weight: bold;
+        }
+
+        .error-prep {
+            color: #7c2d12;
+            font-weight: 600;
+        }
+
+        .fix-keyword {
+            color: var(--navy);
+            font-weight: bold;
+        }
+
+        .fix-action {
+            color: var(--green);
+            font-weight: bold;
+        }
+
+        .fix-syntax {
+            color: #6366f1;
+            font-weight: 600;
+        }
+
+        .fix-string {
+            color: #d946ef;
+            font-weight: normal;
+        }
+
+        .verification-box {
+            border-radius: 6px;
+            padding: 15px;
+            margin-top: 15px;
+            text-align: center;
+            font-weight: 600;
+        }
+
+        .verification-box.success {
+            background: var(--bg-success);
+            border: 1px solid var(--border-success);
+            color: #047857;
+        }
+
+        .verification-box.warning {
+            background: #fef3c7;
+            border: 1px solid #fcd34d;
+            color: #92400e;
+        }
+
+        .verification-box.error {
+            background: var(--bg-error);
+            border: 1px solid var(--border-error);
+            color: #991b1b;
+        }
+
+        .footer {
+            background: #0f172a;
+            border-top: 3px solid #0d9488;
+            padding: 25px 40px;
+            text-align: center;
+            color: var(--white);
             font-size: 0.9em;
         }
-        .icon {
-            font-size: 1.5em;
+
+        .footer p {
+            margin: 8px 0;
         }
-        code {
-            background: #f0f0f0;
-            padding: 2px 5px;
-            border-radius: 3px;
-            font-family: 'Courier New', monospace;
+
+        /* Scrollbar styling */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--grey-light);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--grey);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--navy);
+        }
+
+        /* Responsive design */
+        @media (max-width: 768px) {
+            .header h1 {
+                font-size: 1.8em;
+            }
+            .content {
+                padding: 20px;
+            }
+            .summary {
+                grid-template-columns: 1fr;
+            }
         }
     </style>
 </head>
@@ -313,10 +599,10 @@ function generateHtmlReport(healingResults) {
     <div class="container">
         <div class="header">
             <h1>
-                <span class="icon">🔧</span>
-                Gemini Healer Report
+                <span>✨</span>
+                Self Healer report by Gemini
             </h1>
-            <p>Automated Test Healing & Fixing Session</p>
+            <p>Automated Test Analysis & Fixing Session</p>
         </div>
 
         <div class="content">
@@ -325,11 +611,11 @@ function generateHtmlReport(healingResults) {
                     <p>Tests Analyzed</p>
                     <h3>${healingResults.totalTests}</h3>
                 </div>
-                <div class="stat-card">
+                <div class="stat-card success">
                     <p>Tests Fixed</p>
                     <h3>${healingResults.fixedCount}</h3>
                 </div>
-                <div class="stat-card">
+                <div class="stat-card success">
                     <p>Tests Verified</p>
                     <h3>${healingResults.verifiedCount}</h3>
                 </div>
@@ -340,119 +626,159 @@ function generateHtmlReport(healingResults) {
             </div>
 
             <div class="results">
-                <h2>📋 Healing Results</h2>
-                ${healingResults.tests.map((test, idx) => `
-                    <div class="test-result ${test.verified ? 'success' : 'failed'}">
-                        <div class="test-header" onclick="this.parentElement.classList.toggle('expanded')">
-                            <div style="flex: 1;">
-                                <span class="status-badge ${test.verified ? 'success' : 'failed'}">
-                                    ${test.verified ? '✅ FIXED & VERIFIED' : test.fixed ? '⚠️ FIXED (UNVERIFIED)' : '❌ NOT FIXED'}
-                                </span>
-                                <span style="margin-left: 15px; font-weight: 600;">${test.file}</span>
+                <h2>📋 Test Results</h2>
+                ${(() => {
+                    // Group tests by file/suite
+                    const suites = {};
+                    healingResults.tests.forEach(test => {
+                        const suite = test.file || 'Unknown Suite';
+                        if (!suites[suite]) {
+                            suites[suite] = [];
+                        }
+                        suites[suite].push(test);
+                    });
+
+                    // Generate HTML for each suite
+                    return Object.entries(suites).map(([suite, tests]) => `
+                        <div class="suite-group">
+                            <div class="suite-header">📦 ${suite}</div>
+                            <div class="suite-tests">
+                                ${tests.map((test, testIdx) => {
+                                    const statusClass = test.verified ? 'success' : 'failed';
+                                    const statusText = test.verified ? '✅ FIXED & VERIFIED' : test.fixed ? '⚠️ FIXED (UNVERIFIED)' : '❌ NOT FIXED';
+                                    const statusBadgeClass = test.verified ? 'success' : test.fixed ? 'warning' : 'failed';
+                                    const errorPreview = test.error || 'No error details available';
+                                    const analysisPreview = test.analysis || 'No analysis available';
+
+                                    return `
+                                        <div class="test-result ${statusClass}" data-test-id="${testIdx}">
+                                            <div class="test-header">
+                                                <div>
+                                                    <span class="status-badge ${statusBadgeClass}">${statusText}</span>
+                                                    <span class="test-title">${test.title}</span>
+                                                </div>
+                                                <span class="expand-icon">▶</span>
+                                            </div>
+                                            <div class="test-content">
+                                                <div style="margin-bottom: 20px; padding-bottom: 15px; border-bottom: 1px solid var(--grey-border);">
+                                                    <strong style="color: var(--navy);">Test Name:</strong> ${test.title}
+                                                    <br><strong style="color: var(--navy); margin-top: 8px; display: block;">Error Type:</strong> <span style="color: var(--grey);">${test.errorType}</span>
+                                                </div>
+
+                                                <div class="subsection expanded">
+                                                    <div class="subsection-header" onclick="toggleSubsection(this)">
+                                                        <span><span class="subsection-icon">▶</span>❌ Error Details</span>
+                                                    </div>
+                                                    <div class="subsection-content">
+                                                        <div class="error-text">${formatCodeWithLineNumbers(errorPreview, 'error', 100)}</div>
+                                                    </div>
+                                                </div>
+
+                                                ${test.analysis ? `
+                                                <div class="subsection">
+                                                    <div class="subsection-header" onclick="toggleSubsection(this)">
+                                                        <span><span class="subsection-icon">▶</span>🤖 AI Analysis</span>
+                                                    </div>
+                                                    <div class="subsection-content">
+                                                        <div style="padding: 10px; border-radius: 4px;">
+                                                            ${escapeHtmlNode(analysisPreview).split('\n').map(line => 
+                                                                line.trim() ? `<div class="test-item-line">• ${line}</div>` : ''
+                                                            ).join('')}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                ` : ''}
+
+                                                ${test.fixedCode ? `
+                                                <div class="subsection">
+                                                    <div class="subsection-header" onclick="toggleSubsection(this)">
+                                                        <span><span class="subsection-icon">▶</span>✅ ${test.fixed ? 'Applied' : 'Suggested'} Fix</span>
+                                                    </div>
+                                                    <div class="subsection-content">
+                                                        <div class="fix-text">${formatCodeWithLineNumbers(test.fixedCode, 'fix', 100)}</div>
+                                                    </div>
+                                                </div>
+                                                ` : ''}
+
+                                                ${test.verified ? `
+                                                <div class="verification-box success">
+                                                    ✅ Test Re-run Passed - Error has been resolved!
+                                                </div>
+                                                ` : test.fixed ? `
+                                                <div class="verification-box warning">
+                                                    ⚠️ Fix Applied - Manual verification recommended
+                                                </div>
+                                                ` : `
+                                                <div class="verification-box error">
+                                                    ❌ Unable to fix this test - Review error details
+                                                </div>
+                                                `}
+                                            </div>
+                                        </div>
+                                    `;
+                                }).join('')}
                             </div>
-                            <span class="expand-icon">▶</span>
                         </div>
-                        <div class="test-content">
-                            <div style="margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid #ddd;">
-                                <strong style="color: #333;">Test Name:</strong> ${test.title}
-                            </div>
-
-                            <!-- Aligned Flow: Error → Analysis → Fix -->
-                            <div class="alignment-flow">
-                                <div class="flow-section error">
-                                    <div class="flow-title">❌ Error</div>
-                                    <div class="flow-content">${escapeHtmlNode(test.error.substring(0, 200)).replace(/\n/g, '<br>')}</div>
-                                </div>
-                                <div class="flow-arrow">→</div>
-                                <div class="flow-section analysis">
-                                    <div class="flow-title">🤖 Analysis</div>
-                                    <div class="flow-content">${test.analysis ? escapeHtmlNode(test.analysis.substring(0, 200)).replace(/\n/g, '<br>') : 'No analysis available'}</div>
-                                </div>
-                                <div class="flow-arrow">→</div>
-                                <div class="flow-section fix">
-                                    <div class="flow-title">✅ Fix</div>
-                                    <div class="flow-content">${test.fixed ? '✅ Applied successfully' : test.fixedCode ? '📝 Ready to apply' : '❌ Not fixed'}</div>
-                                </div>
-                            </div>
-
-                            <!-- Detailed Sections -->
-                            <hr style="margin: 20px 0; border: none; border-top: 2px solid #e0e0e0;">
-
-                            <div class="error-section">
-                                <h4>❌ Original Error Details</h4>
-                                <div style="display: flex; gap: 10px; margin-bottom: 10px;">
-                                    <span style="background: #f0f0f0; padding: 5px 10px; border-radius: 3px; font-size: 0.85em; font-weight: 600; color: #666;">Type: ${test.errorType}</span>
-                                </div>
-                                <div class="error-text">${escapeHtmlNode(test.error.substring(0, 800))}</div>
-                            </div>
-
-                            ${test.analysis ? `
-                            <div class="analysis-section">
-                                <h4>🤖 Gemini AI Analysis</h4>
-                                <div class="analysis-text">${escapeHtmlNode(test.analysis.substring(0, 1000)).replace(/\n/g, '<br>')}</div>
-                                <div class="connection-line" style="margin-top: 10px; font-style: italic; color: #0056b3;">
-                                    ↓ Analysis informs the fix below ↓
-                                </div>
-                            </div>
-                            ` : ''}
-
-                            ${test.fixed ? `
-                            <div class="fix-section">
-                                <h4>✅ Applied Fix</h4>
-                                <div style="background: #d4edda; border: 1px solid #c3e6cb; border-radius: 3px; padding: 10px; margin-bottom: 10px; font-size: 0.9em; color: #155724;">
-                                    ✓ Fix has been applied to address the error above
-                                </div>
-                                <div class="fix-text">${escapeHtmlNode(test.fixedCode ? test.fixedCode.substring(0, 800) : 'Code applied successfully')}${test.fixedCode && test.fixedCode.length > 800 ? '\n...' : ''}</div>
-                            </div>
-                            ` : test.fixedCode ? `
-                            <div class="fix-section">
-                                <h4>✅ Suggested Fix (Not Applied)</h4>
-                                <div style="background: #fff3cd; border: 1px solid #ffc107; border-radius: 3px; padding: 10px; margin-bottom: 10px; font-size: 0.9em; color: #856404;">
-                                    ⚠️ Fix suggested by Gemini to resolve the error - Ready for manual review
-                                </div>
-                                <div class="fix-text">${escapeHtmlNode(test.fixedCode.substring(0, 800))}${test.fixedCode.length > 800 ? '\n...' : ''}</div>
-                            </div>
-                            ` : ''}
-
-                            ${test.verified ? `
-                            <div style="background: #d4edda; border: 1px solid #c3e6cb; border-radius: 3px; padding: 10px; margin-top: 15px; color: #155724; text-align: center;">
-                                <strong>✅ Test Re-run Passed</strong> - Error has been resolved and fix is verified!
-                            </div>
-                            ` : test.fixed ? `
-                            <div style="background: #fff3cd; border: 1px solid #ffc107; border-radius: 3px; padding: 10px; margin-top: 15px; color: #856404; text-align: center;">
-                                <strong>⚠️ Fix Applied But Not Verified</strong> - Manual verification recommended
-                            </div>
-                            ` : ''}
-                        </div>
-                    </div>
-                `).join('')}
+                    `).join('');
+                })()}
             </div>
 
             <div class="results">
-                <h2>📊 Summary</h2>
-                <div style="background: #f8f9fa; padding: 15px; border-radius: 5px; line-height: 1.8;">
-                    <p><strong>Session Duration:</strong> ${healingResults.duration}</p>
-                    <p><strong>Total Tests Analyzed:</strong> ${healingResults.totalTests}</p>
-                    <p><strong>Tests Fixed:</strong> ${healingResults.fixedCount}</p>
-                    <p><strong>Tests Verified:</strong> ${healingResults.verifiedCount}</p>
-                    <p><strong>Success Rate:</strong> ${healingResults.successRate}%</p>
-                    <p><strong>Generated At:</strong> ${new Date().toLocaleString()}</p>
+                <h2>📊 Session Summary</h2>
+                <div style="background: var(--grey-light); padding: 20px; border-radius: 6px; border-left: 5px solid var(--navy); line-height: 2;">
+                    <p><strong style="color: var(--navy);">Session Duration:</strong> <span style="color: var(--grey);">${healingResults.duration}</span></p>
+                    <p><strong style="color: var(--navy);">Total Tests Analyzed:</strong> <span style="color: var(--grey);">${healingResults.totalTests}</span></p>
+                    <p><strong style="color: var(--navy);">Tests Fixed:</strong> <span style="color: var(--green);">${healingResults.fixedCount}</span></p>
+                    <p><strong style="color: var(--navy);">Tests Verified:</strong> <span style="color: var(--green);">${healingResults.verifiedCount}</span></p>
+                    <p><strong style="color: var(--navy);">Success Rate:</strong> <span style="color: var(--green);">${healingResults.successRate}%</span></p>
+                    <p><strong style="color: var(--navy);">Generated:</strong> <span style="color: var(--grey);">${new Date().toLocaleString()}</span></p>
                 </div>
             </div>
         </div>
 
         <div class="footer">
-            <p>🔧 Gemini-Powered Playwright Test Healer | Report generated on ${new Date().toLocaleString()}</p>
-            <p style="margin-top: 10px; color: #999;">This report was automatically generated after test healing operations.</p>
+            <p>🔧 <strong>Gemini-Powered Playwright Test Healer</strong></p>
+            <p>Report generated on ${new Date().toLocaleString()}</p>
         </div>
     </div>
 
     <script>
-        // Auto-expand first test result
-        const firstResult = document.querySelector('.test-result');
-        if (firstResult) {
-            firstResult.classList.add('expanded');
+        // Toggle test result visibility
+        function toggleTestResult(headerElement) {
+            const testResult = headerElement.parentElement;
+            testResult.classList.toggle('expanded');
         }
+
+        // Toggle subsection visibility
+        function toggleSubsection(headerElement) {
+            const subsection = headerElement.parentElement;
+            subsection.classList.toggle('expanded');
+        }
+
+        // Initialize on DOM load
+        document.addEventListener('DOMContentLoaded', function() {
+            // Auto-expand first test result
+            const firstResult = document.querySelector('.test-result');
+            if (firstResult) {
+                firstResult.classList.add('expanded');
+            }
+
+            // Add click handlers to all subsection headers
+            document.querySelectorAll('.subsection-header').forEach(header => {
+                header.addEventListener('click', toggleSubsection);
+            });
+
+            // Add click handlers to all test headers
+            document.querySelectorAll('.test-header').forEach(header => {
+                header.addEventListener('click', function(e) {
+                    if (e.target.closest('.subsection-header')) {
+                        e.stopPropagation();
+                        return;
+                    }
+                    toggleTestResult(this);
+                });
+            });
+        });
     </script>
 </body>
 </html>`;

@@ -6,3 +6,11 @@ node_modules/
 /blob-report/
 /playwright/.cache/
 /playwright/.auth/
+/.healer-audit.log/
+/.healer-snapshots/
+/.healer-videos/
+/.healer-traces/
+/.healer-backups/
+.healer-audit.log
+
+
