@@ -6,9 +6,11 @@
   "type": "module",
   "scripts": {
     "test": "playwright test",
-    "heal:gemini": "node gemini-healer.js",
-    "heal:gemini:auto": "node gemini-healer.js --auto-fix",
-    "heal:gemini:verbose": "node gemini-healer.js --auto-fix --verbose",
+    "build": "tsc",
+    "build:watch": "tsc --watch",
+    "clean": "rm -rf dist",
+    "heal:ts": "npm run build && node dist/src/index.js",
+    "heal:results": "npm run build && node dist/src/heal-from-results.js",
     "test:debug": "playwright test --debug --headed"
   },
   "keywords": [],
@@ -17,7 +19,8 @@
   "devDependencies": {
     "@google/generative-ai": "^0.3.1",
     "@playwright/test": "^1.56.1",
-    "@types/node": "^24.10.1"
+    "@types/node": "^24.10.1",
+    "typescript": "^5.3.3"
   },
   "dependencies": {
     "dotenv": "^17.2.3"

@@ -12,5 +12,5 @@ node_modules/
 /.healer-traces/
 /.healer-backups/
 .healer-audit.log
-
+/dist/
 
