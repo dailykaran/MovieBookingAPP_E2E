@@ -715,6 +715,118 @@ function extractTestInfo(spec) {
 }
 
 /**
+ * Security: Sanitize user input for LLM prompts (prevent injection/leakage)
+ */
+function sanitizeForPrompt(input, maxLength = 5000) {
+  if (!input) return '';
+  
+  // Truncate to prevent context overflow
+  let sanitized = input.substring(0, maxLength);
+  
+  // Escape backticks to prevent code block escape
+  sanitized = sanitized.replace(/```/g, '\\`\\`\\`');
+  
+  // Escape quotes to prevent prompt escape
+  sanitized = sanitized.replace(/"/g, '\\"');
+  sanitized = sanitized.replace(/'/g, "\\'");
+  
+  // Remove potentially sensitive paths (local machine info)
+  sanitized = sanitized.replace(/[A-Za-z]:\\[^\s]*/g, '[LOCAL_PATH]');
+  sanitized = sanitized.replace(/\/home\/[^\/\s]*/g, '[HOME_PATH]');
+  sanitized = sanitized.replace(/\/Users\/[^\/\s]*/g, '[USER_PATH]');
+  
+  // Remove email addresses
+  sanitized = sanitized.replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, '[EMAIL]');
+  
+  // Remove IP addresses
+  sanitized = sanitized.replace(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g, '[IP_ADDRESS]');
+  
+  // Remove URLs (except localhost)
+  sanitized = sanitized.replace(/https?:\/\/(?!localhost)[^\s]+/gi, '[URL]');
+  
+  // Truncate with warning if needed
+  if (input.length > maxLength) {
+    sanitized += `\n[... ${input.length - maxLength} characters truncated for token limit]`;
+  }
+  
+  return sanitized;
+}
+
+/**
+ * Security: Sanitize error messages to remove sensitive data
+ */
+function sanitizeErrorMessage(error, maxLength = 1000) {
+  if (!error) return 'Unknown error';
+  
+  let sanitized = error.substring(0, maxLength);
+  
+  // Remove local file paths
+  sanitized = sanitized.replace(/[A-Za-z]:\\[^\s]*/g, '[FILE_PATH]');
+  sanitized = sanitized.replace(/\/home\/[^\/\s]*/g, '[FILE_PATH]');
+  sanitized = sanitized.replace(/\/Users\/[^\/\s]*/g, '[FILE_PATH]');
+  sanitized = sanitized.replace(/\/tmp\/[^\/\s]*/g, '[TEMP_PATH]');
+  
+  // Remove usernames and paths
+  sanitized = sanitized.replace(/\/root\//g, '[ROOT]/');
+  sanitized = sanitized.replace(/~\//g, '[HOME]/');
+  
+  // Remove email addresses
+  sanitized = sanitized.replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, '[EMAIL]');
+  
+  // Remove API keys/tokens (long alphanumeric strings)
+  sanitized = sanitized.replace(/\b[a-zA-Z0-9_]{40,}\b/g, '[SECRET]');
+  
+  // Remove IP addresses
+  sanitized = sanitized.replace(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g, '[IP]');
+  
+  // Remove port numbers that might reveal infrastructure
+  sanitized = sanitized.replace(/localhost:\d{4,5}/g, 'localhost:[PORT]');
+  
+  return sanitized;
+}
+
+/**
+ * Security: Detect prompt injection attempts in user input
+ */
+function detectPromptInjection(input) {
+  if (!input) return false;
+  
+  const injectionPatterns = [
+    /ignore[\s\n]*previous[\s\n]*instructions/gi,
+    /system[\s\n]*prompt/gi,
+    /forget[\s\n]*about/gi,
+    /act[\s\n]*as/gi,
+    /pretend[\s\n]*to[\s\n]*be/gi,
+    /instead[\s\n]*of/gi,
+    /as[\s\n]*an[\s\n]*evil/gi,
+    /bypass[\s\n]*security/gi,
+    /disable[\s\n]*safety/gi,
+    /in[\s\n]*leet[\s\n]*speak/gi,
+    /without[\s\n]*restrictions/gi,
+    /do[\s\n]*not[\s\n]*follow/gi
+  ];
+  
+  return injectionPatterns.some(pattern => pattern.test(input));
+}
+
+/**
+ * Security: Validate test code size to prevent token overflow
+ */
+function validateTestCodeSize(code, maxLength = 50000) {
+  if (!code) return { valid: false, error: 'Test code is empty' };
+  
+  if (code.length > maxLength) {
+    return {
+      valid: false,
+      error: `Test code exceeds maximum length (${code.length} > ${maxLength} chars). May cause token overflow.`,
+      truncated: code.substring(0, maxLength)
+    };
+  }
+  
+  return { valid: true, error: null };
+}
+
+/**
  * Read test file content
  */
 function readTestFile(filePath) {
@@ -751,9 +863,26 @@ function readTestFile(filePath) {
 }
 
 /**
- * Generate comprehensive analysis prompt for Gemini
+ * Generate comprehensive analysis prompt for Gemini with security sanitization
  */
 function generateAnalysisPrompt(testInfo, testCode) {
+  // Security: Validate and sanitize all inputs
+  if (detectPromptInjection(testCode)) {
+    console.warn('⚠️  Warning: Potential prompt injection detected in test code. Proceeding with caution.');
+  }
+  
+  // Validate test code size
+  const codeSizeCheck = validateTestCodeSize(testCode, 50000);
+  if (!codeSizeCheck.valid && codeSizeCheck.truncated) {
+    console.warn(`⚠️  Warning: ${codeSizeCheck.error}`);
+    testCode = codeSizeCheck.truncated;
+  }
+  
+  // Sanitize inputs for safe LLM processing
+  const sanitizedErrorType = sanitizeForPrompt(testInfo.errorType, 100);
+  const sanitizedError = sanitizeErrorMessage(testInfo.error, 1500);
+  const sanitizedTestCode = sanitizeForPrompt(testCode, 40000);
+  
   return `You are an expert Playwright test automation engineer. Analyze this failing test and provide:
 
 1. **Root Cause Analysis**: Explain why the test is failing
@@ -766,15 +895,15 @@ CRITICAL: You MUST provide the complete fixed test code inside a TypeScript code
 The code block MUST include all imports, the complete test function, and closing braces.
 Do NOT truncate the code block. Provide the full, working test code.
 
-Error Type: ${testInfo.errorType}
+Error Type: ${sanitizedErrorType}
 Error Message:
 \`\`\`
-${testInfo.error.substring(0, 1000)}
+${sanitizedError}
 \`\`\`
 
 Current Test Code:
 \`\`\`typescript
-${testCode}
+${sanitizedTestCode}
 \`\`\`
 
 Analysis Focus Areas:
