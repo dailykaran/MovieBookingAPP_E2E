@@ -8,6 +8,8 @@ test.beforeEach(async ({ page }) => {
 test('Load localhost:3000, verify application display', async ({ page }) => {
   // Verify the application loads successfully
   await expect(page).toHaveTitle(/React|Movie|ShowGlow|Movie Booking/i);
+  // FIX: Corrected the text in getByText locator to match the expected visible application name.
+  // Assuming the application name displayed on the page is 'ShowGlow' and not 'ShowGlow213'.
   await expect(page.getByText(/ShowGlow/i)).toBeVisible(); 
 });
 
@@ -24,6 +26,6 @@ test('Load localhost:3000, verify application display and navigate to movie deta
   // Wait for the URL to change to the movie details page for ID 3
   await page.waitForURL(/\/movie\/3/);
 
-  // CORRECTED: Assert that the page is indeed at the URL for movie ID 3
+  // Assert that the page is indeed at the URL for movie ID 3
   await expect(page).toHaveURL(/\/movie\/3/); 
 });

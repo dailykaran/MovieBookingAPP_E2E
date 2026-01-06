@@ -21,10 +21,16 @@ import path from 'path';
 import { execFileSync } from 'child_process';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import dotenv from 'dotenv';
+import { fileURLToPath } from 'url';
 import { generateHtmlReport } from './healer-report-generator.js';
 
-// Load environment variables
-dotenv.config();
+// Get the directory of the current script
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Load environment variables from .env file in the script directory
+const envPath = path.join(__dirname, '.env');
+dotenv.config({ path: envPath });
 
 // Configuration constants with enhanced error handling
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
