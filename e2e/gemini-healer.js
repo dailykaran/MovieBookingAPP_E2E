@@ -52,6 +52,128 @@ const REQUIRED_PACKAGES = ['@google/generative-ai', '@playwright/test', 'dotenv'
 // Track API call rate for rate limiting
 let apiCallTimes = [];
 
+// ========== LOGGING SYSTEM ==========
+
+// In-memory log storage
+let healingLogs = {
+  sessionId: generateSessionId(),
+  startTime: new Date().toISOString(),
+  events: [],
+  statistics: {
+    totalEvents: 0,
+    failedLocators: 0,
+    workedLocators: 0,
+    elementsHealed: 0
+  }
+};
+
+/**
+ * Generate unique session ID
+ */
+function generateSessionId() {
+  return `healing-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+}
+
+/**
+ * Log a healing event with all relevant details
+ */
+function logHealingEvent(eventType, elementName, failedLocator, workingLocator, details = {}) {
+  const logEntry = {
+    timestamp: new Date().toISOString(),
+    sessionId: healingLogs.sessionId,
+    eventType, // 'locator_failure', 'locator_found', 'element_healed', 'verification_passed', etc.
+    elementName,
+    failedLocator,
+    workingLocator,
+    details,
+    duration: details.duration || null
+  };
+
+  healingLogs.events.push(logEntry);
+  healingLogs.statistics.totalEvents++;
+
+  if (eventType === 'locator_failure') {
+    healingLogs.statistics.failedLocators++;
+  } else if (eventType === 'locator_found') {
+    healingLogs.statistics.workedLocators++;
+  } else if (eventType === 'element_healed') {
+    healingLogs.statistics.elementsHealed++;
+  }
+
+  if (HEALER_VERBOSE) {
+    console.log(`📝 [LOG] ${eventType}: ${elementName} | Failed: ${failedLocator} | Working: ${workingLocator}`);
+  }
+
+  return logEntry;
+}
+
+/**
+ * Get current session statistics
+ */
+function getSessionStatistics() {
+  return {
+    ...healingLogs.statistics,
+    sessionDuration: new Date(new Date() - new Date(healingLogs.startTime)).toISOString().substr(11, 8),
+    totalLogEntries: healingLogs.events.length,
+    eventTypes: healingLogs.events.reduce((acc, event) => {
+      acc[event.eventType] = (acc[event.eventType] || 0) + 1;
+      return acc;
+    }, {})
+  };
+}
+
+/**
+ * Write logs to JSON file (healing-logs.json)
+ */
+function persistLogs() {
+  const logsDir = path.join(process.cwd(), 'test-results');
+  if (!fs.existsSync(logsDir)) {
+    fs.mkdirSync(logsDir, { recursive: true });
+  }
+
+  const logsPath = path.join(logsDir, 'healing-logs.json');
+  const logsData = {
+    ...healingLogs,
+    endTime: new Date().toISOString(),
+    statistics: getSessionStatistics()
+  };
+
+  try {
+    fs.writeFileSync(logsPath, JSON.stringify(logsData, null, 2), 'utf8');
+    if (HEALER_VERBOSE) {
+      console.log(`✅ Logs persisted to: ${logsPath}`);
+    }
+  } catch (err) {
+    console.error(`❌ Failed to persist logs: ${err.message}`);
+  }
+
+  return logsPath;
+}
+
+/**
+ * Get all healing logs for reporting
+ */
+function getHealingLogs() {
+  return healingLogs;
+}
+
+/**
+ * Clear in-memory logs (useful for batch processing)
+ */
+function clearLogs() {
+  healingLogs = {
+    sessionId: generateSessionId(),
+    startTime: new Date().toISOString(),
+    events: [],
+    statistics: {
+      totalEvents: 0,
+      failedLocators: 0,
+      workedLocators: 0,
+      elementsHealed: 0
+    }
+  };
+}
+
 // Validate API key
 if (!GEMINI_API_KEY) {
   console.error('❌ GEMINI_API_KEY environment variable is not set!');
@@ -931,7 +1053,7 @@ async function analyzeWithGemini(testInfo, testCode, retryCount = 0) {
     await rateLimitAndWait();
     
     const model = genAI.getGenerativeModel({
-      model: 'gemini-2.5-flash'
+      model: 'gemini-2.5-flash-lite'
     });
 
     const prompt = generateAnalysisPrompt(testInfo, testCode);
@@ -1451,13 +1573,32 @@ async function heal() {
           testResult.fixed = true;
           healingResults.fixedCount++;
 
+          // Log successful fix application
+          logHealingEvent('element_healed', test.title, 'original_locator', 'fixed_locator', {
+            filePath: test.filePath,
+            status: 'applied'
+          });
+
           const verified = verifyFix(test.filePath);
           if (verified) {
             console.log('✅ Test passed after healing!');
             testResult.verified = true;
             healingResults.verifiedCount++;
+
+            // Log verification success
+            logHealingEvent('verification_passed', test.title, null, null, {
+              filePath: test.filePath,
+              status: 'verified'
+            });
           } else {
             console.log('⚠️  Test still failing after fix. Attempting rollback...');
+
+            // Log verification failure
+            logHealingEvent('verification_failed', test.title, null, null, {
+              filePath: test.filePath,
+              status: 'unverified'
+            });
+
             if (applyResult.backupPath && rollbackFix(test.filePath, applyResult.backupPath)) {
               testResult.fixed = false;
               healingResults.fixedCount--;
@@ -1467,6 +1608,10 @@ async function heal() {
             }
           }
         } else {
+          // Log fix application failure
+          logHealingEvent('locator_failure', test.title, 'attempted_fix', null, {
+            error: applyResult.error
+          });
           testResult.failureReason = applyResult.error;
         }
       } else {
@@ -1477,6 +1622,11 @@ async function heal() {
     } else {
       console.error('❌ Could not extract fixed code from Gemini response');
       testResult.failureReason = 'Code extraction failed';
+
+      // Log extraction failure
+      logHealingEvent('locator_failure', test.title, 'extraction_attempt', null, {
+        error: 'Code extraction failed'
+      });
     }
 
     healingResults.tests.push(testResult);
@@ -1497,6 +1647,9 @@ async function heal() {
   
   displayHealingSummary(healingResults);
   generateErrorReport(healingResults);
+
+  // Persist logs before generating HTML report
+  persistLogs();
 
   if (options.autoFix && healingResults.totalTests > 0) {
     generateHtmlReport(healingResults);

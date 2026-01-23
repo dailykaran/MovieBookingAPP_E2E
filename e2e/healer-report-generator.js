@@ -64,6 +64,61 @@ function formatCodeWithLineNumbers(code, type = 'error', maxLines = 8) {
 }
 
 /**
+ * Load healing logs from JSON file
+ */
+function loadHealingLogs() {
+  const logsPath = path.join(process.cwd(), 'test-results', 'healing-logs.json');
+  try {
+    if (fs.existsSync(logsPath)) {
+      const logsData = fs.readFileSync(logsPath, 'utf8');
+      return JSON.parse(logsData);
+    }
+  } catch (err) {
+    console.warn(`⚠️  Could not load healing logs: ${err.message}`);
+  }
+  return null;
+}
+
+/**
+ * Generate locator healing summary HTML
+ */
+function generateLocatorSummary(healingLogs) {
+  if (!healingLogs || !healingLogs.events) return '';
+
+  const locatorEvents = healingLogs.events.filter(e => 
+    e.eventType === 'locator_failure' || e.eventType === 'locator_found'
+  );
+
+  if (locatorEvents.length === 0) return '';
+
+  const locatorHeals = {};
+  locatorEvents.forEach(event => {
+    const key = event.elementName || 'Unknown';
+    if (!locatorHeals[key]) {
+      locatorHeals[key] = [];
+    }
+    locatorHeals[key].push(event);
+  });
+
+  return Object.entries(locatorHeals).map(([elementName, events]) => `
+    <div class="locator-heal-item">
+      <div class="locator-header">
+        <strong style="color: var(--navy);">🎯 ${escapeHtmlNode(elementName)}</strong>
+      </div>
+      <div style="margin-top: 10px; padding: 12px; background: var(--grey-light); border-radius: 4px;">
+        ${events.map(event => `
+          <div style="margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--grey-border);">
+            <div><strong>❌ Failed:</strong> <code style="background: #fee2e2; padding: 4px 8px; border-radius: 3px; font-size: 0.9em;">${escapeHtmlNode(event.failedLocator)}</code></div>
+            <div style="margin-top: 5px;"><strong>✅ Working:</strong> <code style="background: #d1fae5; padding: 4px 8px; border-radius: 3px; font-size: 0.9em;">${escapeHtmlNode(event.workingLocator)}</code></div>
+            <div style="margin-top: 5px; font-size: 0.85em; color: var(--grey);">🕐 ${new Date(event.timestamp).toLocaleTimeString()}</div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `).join('');
+}
+
+/**
  * Generate HTML report for healer session
  */
 function generateHtmlReport(healingResults) {
@@ -73,6 +128,9 @@ function generateHtmlReport(healingResults) {
   if (!fs.existsSync(reportDir)) {
     fs.mkdirSync(reportDir, { recursive: true });
   }
+
+  // Load healing logs if available
+  const healingLogs = loadHealingLogs();
 
   const htmlContent = `<!DOCTYPE html>
 <html lang="en">
@@ -386,6 +444,75 @@ function generateHtmlReport(healingResults) {
         .fix-text {
             background: var(--bg-success);
             border-color: var(--border-success);
+        }
+
+        .locator-heal-item {
+            background: var(--white);
+            border: 1px solid var(--grey-border);
+            border-radius: 6px;
+            padding: 15px;
+            margin-bottom: 15px;
+            transition: box-shadow 0.2s;
+        }
+
+        .locator-heal-item:hover {
+            box-shadow: 0 4px 12px rgba(30, 58, 138, 0.08);
+        }
+
+        .locator-header {
+            padding: 10px 0;
+            border-bottom: 2px solid var(--navy);
+            margin-bottom: 12px;
+        }
+
+        .log-entry {
+            padding: 12px;
+            margin: 8px 0;
+            background: #f9fafb;
+            border-left: 4px solid var(--navy);
+            border-radius: 4px;
+            font-family: 'Courier New', 'Monaco', 'Menlo', monospace;
+            font-size: 0.85em;
+            line-height: 1.6;
+        }
+
+        .log-entry.failure {
+            border-left-color: #ef4444;
+            background: #fef2f2;
+        }
+
+        .log-entry.success {
+            border-left-color: var(--green);
+            background: #f0fdf4;
+        }
+
+        .log-stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .log-stat-card {
+            background: var(--grey-light);
+            border-radius: 6px;
+            padding: 15px;
+            text-align: center;
+            border: 1px solid var(--grey-border);
+        }
+
+        .log-stat-card h4 {
+            color: var(--navy);
+            margin-bottom: 8px;
+            font-size: 0.9em;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .log-stat-card .value {
+            font-size: 1.8em;
+            font-weight: bold;
+            color: var(--green);
         }
 
         .suite-group {
@@ -734,6 +861,62 @@ function generateHtmlReport(healingResults) {
                     <p><strong style="color: var(--navy);">Generated:</strong> <span style="color: var(--grey);">${new Date().toLocaleString()}</span></p>
                 </div>
             </div>
+
+            ${healingLogs ? `
+            <div class="results">
+                <h2>📝 Healing Events Log</h2>
+                
+                <div class="log-stats-grid">
+                    <div class="log-stat-card">
+                        <h4>Total Events</h4>
+                        <div class="value">${healingLogs.statistics?.totalEvents || 0}</div>
+                    </div>
+                    <div class="log-stat-card">
+                        <h4>Failed Locators</h4>
+                        <div class="value">${healingLogs.statistics?.failedLocators || 0}</div>
+                    </div>
+                    <div class="log-stat-card">
+                        <h4>Working Locators</h4>
+                        <div class="value">${healingLogs.statistics?.workedLocators || 0}</div>
+                    </div>
+                    <div class="log-stat-card">
+                        <h4>Elements Healed</h4>
+                        <div class="value">${healingLogs.statistics?.elementsHealed || 0}</div>
+                    </div>
+                </div>
+
+                <h3 style="color: var(--navy); margin-top: 25px; margin-bottom: 15px; border-bottom: 2px solid var(--navy); padding-bottom: 10px;">
+                    🎯 Locator Healing Details
+                </h3>
+                ${generateLocatorSummary(healingLogs) || '<p style="color: var(--grey); font-style: italic;">No locator healing events recorded.</p>'}
+
+                <h3 style="color: var(--navy); margin-top: 25px; margin-bottom: 15px; border-bottom: 2px solid var(--navy); padding-bottom: 10px;">
+                    📋 Event Timeline
+                </h3>
+                <div style="max-height: 600px; overflow-y: auto;">
+                    ${healingLogs.events?.length > 0 ? healingLogs.events.map(event => `
+                        <div class="log-entry ${event.eventType.includes('failure') ? 'failure' : 'success'}">
+                            <div><strong>[${event.eventType.toUpperCase()}]</strong> ${new Date(event.timestamp).toLocaleTimeString()}</div>
+                            <div style="margin-top: 5px; color: var(--text-secondary); font-size: 0.9em;">
+                                <span>📌 Element: <strong>${escapeHtmlNode(event.elementName || 'N/A')}</strong></span>
+                            </div>
+                            ${event.failedLocator ? `<div style="margin-top: 4px; color: #7c2d12;">❌ Failed: ${escapeHtmlNode(event.failedLocator)}</div>` : ''}
+                            ${event.workingLocator ? `<div style="margin-top: 4px; color: #047857;">✅ Working: ${escapeHtmlNode(event.workingLocator)}</div>` : ''}
+                            ${event.duration ? `<div style="margin-top: 4px; color: var(--grey); font-size: 0.85em;">⏱️ Duration: ${event.duration}ms</div>` : ''}
+                        </div>
+                    `).join('') : '<p style="color: var(--grey); font-style: italic;">No events recorded.</p>'}
+                </div>
+
+                <div style="margin-top: 15px; padding: 15px; background: #f9fafb; border-radius: 6px; border-left: 4px solid var(--navy);">
+                    <strong style="color: var(--navy);">Session Info:</strong>
+                    <div style="margin-top: 8px; font-size: 0.9em; color: var(--grey); font-family: 'Courier New', monospace;">
+                        <div>Session ID: ${escapeHtmlNode(healingLogs.sessionId || 'N/A')}</div>
+                        <div>Started: ${new Date(healingLogs.startTime).toLocaleString()}</div>
+                        ${healingLogs.endTime ? `<div>Ended: ${new Date(healingLogs.endTime).toLocaleString()}</div>` : ''}
+                    </div>
+                </div>
+            </div>
+            ` : ''}
         </div>
 
         <div class="footer">
@@ -790,4 +973,4 @@ function generateHtmlReport(healingResults) {
   return reportPath;
 }
 
-export { generateHtmlReport, escapeHtmlNode };
+export { generateHtmlReport, escapeHtmlNode, loadHealingLogs, generateLocatorSummary };
