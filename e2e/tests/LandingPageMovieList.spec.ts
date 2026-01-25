@@ -8,7 +8,7 @@ test.beforeEach(async ({ page }) => {
 test('Load localhost:3000, verify application display', async ({ page }) => {
   await expect(page).toHaveTitle(/React|Movie|ShowGlow|Movie Booking/i);
 
-  await expect(page.getByText(/ShowGlow/i, { exact: false })).toBeVisible();
+  await expect(page.getByText(/ShowGlow_re/i, { exact: true })).toBeVisible();
 });
 
 test('Load localhost:3000, verify application display and navigate to movie details for ID 3', async ({ page }) => {
@@ -19,8 +19,8 @@ test('Load localhost:3000, verify application display and navigate to movie deta
 
   await movie3Link.click();
 
-  await page.waitForURL(/\/movie\/3/);
-  await expect(page).toHaveURL(/\/movie\/3/);
+  await page.waitForURL(/\/movie\/4/);
+  await expect(page).toHaveURL(/\/movie\/4/);
 
   const actionButton = page.getByRole('button', { name: 'Book Now' });
 

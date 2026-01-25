@@ -23,6 +23,11 @@ cd e2e && npm install && npx playwright install --with-deps && npx playwright te
 
 **Critical**: Backend MUST start first; frontend hardcodes `http://localhost:5000/api`. Verify ports 5000 & 3000 are free.
 
+**Startup Validation**:
+- Backend ready when: `Server is running on port 5000`
+- Frontend ready when: Automatically opens `http://localhost:3000` in browser
+- Both must be running before E2E tests; tests expect full app accessible at localhost:3000
+
 ---
 
 ## Architecture: The Data Flow
@@ -106,6 +111,17 @@ navigate('/user-details', { state: { movieId, selectedSeats, showtime, ... } });
 - **PaymentPage** + **MovieDetails** must check error state and alert user
 - **Missing = silent failures**; users think booking succeeded when it didn't
 
+### 🔴 Data Model: showtimeSeats Structure
+The `Movie` interface has a `showtimeSeats[]` array (not a simple object):
+```typescript
+showtimeSeats: Array<{
+  showtime: string;        // e.g., "14:00"
+  availableSeats: number[]; // Pool of available seat IDs
+  bookedSeats: number[];    // Pool of booked seat IDs
+}>
+```
+**Why array, not object?** Allows TypeScript typing + efficient filtering. Always use array methods (`find()`, `filter()`, `map()`) to access by showtime, never direct key access like `showtimeSeats["14:00"]`.
+
 ---
 
 ## Developer Workflows & Commands
@@ -184,6 +200,7 @@ cd e2e && npm run test                     # After one-time setup
 - Tests assume 8 seeded movies; if dataset changes, update [e2e/tests/seed.spec.ts](e2e/tests/seed.spec.ts)
 - **No `test.only` in CI** (will fail CI); use `--grep` for local filtering
 - Traces auto-captured on first retry (`trace: 'on-first-retry'` in config)
+- Variable naming: `unavailableSeats` (not `unavailable`), `freshMovie` (when fetching latest state for validation), `bookingDetails` (from location.state)
 
 ### UI Styling Convention
 - Material-UI with theme primary `#1976d2`, secondary `#dc004e`
@@ -212,7 +229,7 @@ cd e2e && npm run test                     # After one-time setup
 
 ## E2E Testing & Healing Workflow
 
-The `e2e/` folder includes **Gemini-powered auto-healing** for test failures:
+The `e2e/` folder includes **Gemini-powered auto-healing** for test failures. This is critical for maintaining tests as the UI evolves.
 
 ### Manual E2E Workflow
 ```bash
@@ -220,18 +237,32 @@ cd e2e
 npm install
 npx playwright install --with-deps  # One-time browser download
 npm test                            # Run all tests (headless)
-npx playwright show-report          # View HTML report
+npx playwright show-report          # View HTML report (at e2e/playwright-report/index.html)
 ```
 
 ### E2E Auto-Healing (Requires Gemini API Key)
 ```bash
 cd e2e
-# Set GEMINI_API_KEY in .env
+# Set GEMINI_API_KEY in .env (from Google AI Studio)
 npm run heal:gemini:auto            # Run tests + auto-fix failures
 npm run heal:gemini                 # Analyze failures without applying fixes
+npm run heal:gemini:verbose         # Analyze + auto-fix with detailed logging
 ```
 
-**How it works**: Captures test errors + screenshots → sends to Gemini API → analyzes selectors/logic → suggests/applies fixes → re-runs tests.
+**How it works**: 
+1. Captures test errors + Playwright trace files + screenshots
+2. Sends artifacts to Gemini API for analysis
+3. Gemini suggests specific code fixes (selector updates, logic corrections)
+4. Auto-healing applies fixes directly to test files in `e2e/tests/`
+5. Re-runs tests to validate fixes
+6. Generated reports in `e2e/playwright-report/` and healing logs
+
+**Key files**:
+- [e2e/gemini-healer.js](e2e/gemini-healer.js) — Main healing logic; supports `--auto-fix` flag
+- [e2e/healer-report-generator.js](e2e/healer-report-generator.js) — Generates healing analysis reports
+- [e2e/verify-sanitization.js](e2e/verify-sanitization.js) — Ensures fixes are valid before applying
+
+**Why this matters**: As React components change, selectors and test logic break. Gemini auto-healer keeps tests in sync with UI changes automatically.
 
 ---
 

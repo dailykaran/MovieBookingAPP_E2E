@@ -178,11 +178,33 @@ function clearLogs() {
 if (!GEMINI_API_KEY) {
   console.error('❌ GEMINI_API_KEY environment variable is not set!');
   console.error('Please set GEMINI_API_KEY in your .env file or environment.');
+  console.error('Get a new key from: https://aistudio.google.com/app/apikeys');
   process.exit(1);
 }
 
-if (!/^[a-zA-Z0-9_-]{20,}$/.test(GEMINI_API_KEY)) {
+// Validate API key exists and has minimum length
+if (!GEMINI_API_KEY || GEMINI_API_KEY.trim().length === 0) {
+  console.error('❌ GEMINI_API_KEY environment variable is not set!');
+  console.error('Please set GEMINI_API_KEY in your .env file or environment.');
+  console.error('Get a new key from: https://aistudio.google.com/app/apikeys');
+  process.exit(1);
+}
+
+// Check that it starts with AIzaSy (standard Gemini API key format)
+if (!GEMINI_API_KEY.startsWith('AIzaSy')) {
   console.error('❌ GEMINI_API_KEY format appears invalid');
+  console.error('Valid keys start with "AIzaSy"');
+  console.error('Got: ' + GEMINI_API_KEY.substring(0, 10) + '...');
+  console.error('Get a new key from: https://aistudio.google.com/app/apikeys');
+  process.exit(1);
+}
+
+// Check minimum length (Gemini keys are typically 39+ characters)
+if (GEMINI_API_KEY.length < 30) {
+  console.error('❌ GEMINI_API_KEY appears too short');
+  console.error('Valid keys are typically 39+ characters');
+  console.error('Got length: ' + GEMINI_API_KEY.length);
+  console.error('Get a new key from: https://aistudio.google.com/app/apikeys');
   process.exit(1);
 }
 
