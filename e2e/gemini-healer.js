@@ -33,7 +33,7 @@ const envPath = path.join(__dirname, '.env');
 dotenv.config({ path: envPath });
 
 // Configuration constants with enhanced error handling
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const GEMINI_API_KEY_TEST= process.env.GEMINI_API_KEY_TEST;
 const HEALER_AUTO_FIX = process.env.HEALER_AUTO_FIX === 'true';
 const HEALER_VERBOSE = process.env.HEALER_VERBOSE === 'true';
 const HEALER_MAX_FILE_SIZE = parseInt(process.env.HEALER_MAX_FILE_SIZE || '1048576', 10); // 1MB
@@ -53,19 +53,19 @@ const REQUIRED_PACKAGES = ['@google/generative-ai', '@playwright/test', 'dotenv'
 let apiCallTimes = [];
 
 // Validate API key
-if (!GEMINI_API_KEY) {
-  console.error('❌ GEMINI_API_KEY environment variable is not set!');
-  console.error('Please set GEMINI_API_KEY in your .env file or environment.');
+if (!GEMINI_API_KEY_TEST) {
+  console.error('❌ GEMINI_API_KEY_TEST environment variable is not set!');
+  console.error('Please set GEMINI_API_KEY_TEST in your .env file or environment.');
   process.exit(1);
 }
 
-if (!/^[a-zA-Z0-9_-]{20,}$/.test(GEMINI_API_KEY)) {
-  console.error('❌ GEMINI_API_KEY format appears invalid');
+if (!/^[a-zA-Z0-9_-]{20,}$/.test(GEMINI_API_KEY_TEST)) {
+  console.error('❌ GEMINI_API_KEY_TEST format appears invalid');
   process.exit(1);
 }
 
 // Initialize Gemini AI
-const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+const genAI = new GoogleGenerativeAI(GEMINI_API_KEY_TEST);
 
 /**
  * Check if required npm packages are installed (Dependency Check)
@@ -265,7 +265,7 @@ Examples:
   node gemini-healer.js localhost-3000     # Heal specific test file
 
 Environment Variables:
-  GEMINI_API_KEY              Your Google Generative AI API key (required)
+  GEMINI_API_KEY_TEST           Your Google Generative AI API key (required)
   HEALER_AUTO_FIX             Default auto-fix behavior (true/false)
   HEALER_VERBOSE              Default verbose logging (true/false)
   HEALER_MAX_RETRIES          Maximum retry attempts (default: 3)
@@ -931,7 +931,7 @@ async function analyzeWithGemini(testInfo, testCode, retryCount = 0) {
     await rateLimitAndWait();
     
     const model = genAI.getGenerativeModel({
-      model: 'gemini-2.5-flash'
+      model: 'gemini-2.5-flash-lite',
     });
 
     const prompt = generateAnalysisPrompt(testInfo, testCode);
@@ -1357,7 +1357,7 @@ async function heal() {
   console.log(`⚙️  Configuration:`);
   console.log(`   Auto-Fix: ${options.autoFix ? '✅ Enabled' : '❌ Disabled'}`);
   console.log(`   Verbose: ${options.verbose ? '✅ Enabled' : '❌ Disabled'}`);
-  console.log(`   API Key: ${GEMINI_API_KEY ? '✅ Configured' : '❌ Missing'}\n`);
+  console.log(`   API Key: ${GEMINI_API_KEY_TEST ? '✅ Configured' : '❌ Missing'}\n`);
 
   console.log('📊 Analyzing test failures...\n');
   let failedTests = getFailedTests();
