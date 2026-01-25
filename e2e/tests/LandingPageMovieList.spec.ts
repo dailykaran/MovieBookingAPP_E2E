@@ -24,8 +24,8 @@ test('Load localhost:3000, verify application display and navigate to movie deta
   await movie3Link.click();
 
   // Wait for the URL to change to the movie details page for ID 3
-  await page.waitForURL(/\/movie\/3/);
+  await page.waitForURL(/\/moviewrong\/3/);
 
   // Assert that the page is indeed at the URL for movie ID 3
-  await expect(page).toHaveURL(/\/movie\/3/); 
+  await expect(page).toHaveURL(/\/moviewrong\/3/); 
 });
