@@ -19,7 +19,7 @@ test('Load localhost:3000, verify application display and navigate to movie deta
   await expect(bookButton).toBeVisible();
   await bookButton.click();
 
-  await page.waitForURL(/\/movie\/3/);
+  await page.waitForURL(/\/movietested\/3/);
 
-  await expect(page).toHaveURL(/\/movie\/3/); 
+  await expect(page).toHaveURL(/\/movietested\/3/); 
 });
