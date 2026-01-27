@@ -33,7 +33,7 @@ const envPath = path.join(__dirname, '.env');
 dotenv.config({ path: envPath });
 
 // Configuration constants with enhanced error handling
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const GEMINI_API_KEY_TEST = process.env.GEMINI_API_KEY_TEST;
 const HEALER_AUTO_FIX = process.env.HEALER_AUTO_FIX === 'true';
 const HEALER_VERBOSE = process.env.HEALER_VERBOSE === 'true';
 const HEALER_MAX_FILE_SIZE = parseInt(process.env.HEALER_MAX_FILE_SIZE || '1048576', 10); // 1MB
@@ -94,9 +94,11 @@ function logHealingEvent(eventType, elementName, failedLocator, workingLocator, 
 
   if (eventType === 'locator_failure') {
     healingLogs.statistics.failedLocators++;
-  } else if (eventType === 'locator_found') {
+  } else if (eventType === 'locator_found' || eventType === 'element_healed') {
     healingLogs.statistics.workedLocators++;
-  } else if (eventType === 'element_healed') {
+  }
+
+  if (eventType === 'element_healed') {
     healingLogs.statistics.elementsHealed++;
   }
 
@@ -150,66 +152,36 @@ function persistLogs() {
   return logsPath;
 }
 
-/**
- * Get all healing logs for reporting
- */
-function getHealingLogs() {
-  return healingLogs;
-}
 
-/**
- * Clear in-memory logs (useful for batch processing)
- */
-function clearLogs() {
-  healingLogs = {
-    sessionId: generateSessionId(),
-    startTime: new Date().toISOString(),
-    events: [],
-    statistics: {
-      totalEvents: 0,
-      failedLocators: 0,
-      workedLocators: 0,
-      elementsHealed: 0
-    }
-  };
-}
 
 // Validate API key
-if (!GEMINI_API_KEY) {
-  console.error('❌ GEMINI_API_KEY environment variable is not set!');
-  console.error('Please set GEMINI_API_KEY in your .env file or environment.');
-  console.error('Get a new key from: https://aistudio.google.com/app/apikeys');
-  process.exit(1);
-}
-
-// Validate API key exists and has minimum length
-if (!GEMINI_API_KEY || GEMINI_API_KEY.trim().length === 0) {
-  console.error('❌ GEMINI_API_KEY environment variable is not set!');
-  console.error('Please set GEMINI_API_KEY in your .env file or environment.');
+if (!GEMINI_API_KEY_TEST) {
+  console.error('❌ GEMINI_API_KEY_TEST environment variable is not set!');
+  console.error('Please set GEMINI_API_KEY_TEST in your .env file or environment.');
   console.error('Get a new key from: https://aistudio.google.com/app/apikeys');
   process.exit(1);
 }
 
 // Check that it starts with AIzaSy (standard Gemini API key format)
-if (!GEMINI_API_KEY.startsWith('AIzaSy')) {
-  console.error('❌ GEMINI_API_KEY format appears invalid');
+if (!GEMINI_API_KEY_TEST.startsWith('AIzaSy')) {
+  console.error('❌ GEMINI_API_KEY_TEST format appears invalid');
   console.error('Valid keys start with "AIzaSy"');
-  console.error('Got: ' + GEMINI_API_KEY.substring(0, 10) + '...');
+  console.error('Got: ' + GEMINI_API_KEY_TEST.substring(0, 10) + '...');
   console.error('Get a new key from: https://aistudio.google.com/app/apikeys');
   process.exit(1);
 }
 
 // Check minimum length (Gemini keys are typically 39+ characters)
-if (GEMINI_API_KEY.length < 30) {
-  console.error('❌ GEMINI_API_KEY appears too short');
+if (GEMINI_API_KEY_TEST.length < 30) {
+  console.error('❌ GEMINI_API_KEY_TEST appears too short');
   console.error('Valid keys are typically 39+ characters');
-  console.error('Got length: ' + GEMINI_API_KEY.length);
+  console.error('Got length: ' + GEMINI_API_KEY_TEST.length);
   console.error('Get a new key from: https://aistudio.google.com/app/apikeys');
   process.exit(1);
 }
 
 // Initialize Gemini AI
-const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+const genAI = new GoogleGenerativeAI(GEMINI_API_KEY_TEST);
 
 /**
  * Check if required npm packages are installed (Dependency Check)
@@ -409,7 +381,7 @@ Examples:
   node gemini-healer.js localhost-3000     # Heal specific test file
 
 Environment Variables:
-  GEMINI_API_KEY              Your Google Generative AI API key (required)
+  GEMINI_API_KEY_TEST              Your Google Generative AI API key (required)
   HEALER_AUTO_FIX             Default auto-fix behavior (true/false)
   HEALER_VERBOSE              Default verbose logging (true/false)
   HEALER_MAX_RETRIES          Maximum retry attempts (default: 3)
@@ -692,6 +664,41 @@ function cleanupOldBackups() {
     }
   } catch (err) {
     console.warn(`⚠️  Backup cleanup error: ${err.message}`);
+  }
+}
+
+/**
+ * Cleanup old HTML reports to prevent disk bloat (Report Cleanup)
+ */
+function cleanupOldReports() {
+  try {
+    const reportDir = path.join(process.cwd(), 'test-results');
+    if (!fs.existsSync(reportDir)) return;
+    
+    const files = fs.readdirSync(reportDir);
+    let deletedCount = 0;
+    
+    files.forEach(file => {
+      // Match healer report HTML files: healer-report-*.html, healer-error-report-*.json
+      if (file.match(/^healer.*\.(html|json)$/) && file !== 'results.json' && file !== 'healing-logs.json') {
+        const filePath = path.join(reportDir, file);
+        try {
+          fs.unlinkSync(filePath);
+          deletedCount++;
+          if (HEALER_VERBOSE) {
+            console.log(`🗑️  Removed old report: ${file}`);
+          }
+        } catch (err) {
+          console.warn(`⚠️  Could not delete ${file}: ${err.message}`);
+        }
+      }
+    });
+    
+    if (deletedCount > 0) {
+      console.log(`🧹 Cleaned up ${deletedCount} old report(s)\n`);
+    }
+  } catch (err) {
+    console.error(`⚠️  Error cleaning up reports: ${err.message}`);
   }
 }
 
@@ -1013,6 +1020,102 @@ function readTestFile(filePath) {
 }
 
 /**
+ * Intelligently analyze test code to identify what elements are being tested
+ * and provide recommendations for resilient selectors
+ */
+function analyzeTestIntentAndSelectors(testCode) {
+  if (!testCode) return null;
+
+  const analysis = {
+    testActions: [],
+    elementIntents: [],
+    currentSelectors: [],
+    recommendedSelectors: []
+  };
+
+  // Extract test actions to understand intent
+  const actionPatterns = [
+    { pattern: /\.click\(\)/g, action: 'click' },
+    { pattern: /\.fill\(/g, action: 'fill_text' },
+    { pattern: /\.type\(/g, action: 'type_text' },
+    { pattern: /\.goto\(/g, action: 'navigate' },
+    { pattern: /\.check\(\)/g, action: 'check_checkbox' },
+    { pattern: /\.select\(/g, action: 'select_option' },
+    { pattern: /\.dblClick\(\)/g, action: 'double_click' }
+  ];
+
+  actionPatterns.forEach(({ pattern, action }) => {
+    if (pattern.test(testCode)) {
+      analysis.testActions.push(action);
+    }
+  });
+
+  // Extract current selectors
+  const selectorPatterns = [
+    /page\.locator\(['"](.*?)['"]\)/g,
+    /getByRole\(['"]([\w]+)['"][^)]*,\s*\{\s*name:\s*['"](.*?)['"]\s*\}/g,
+    /getByText\(['"](.*?)['"]\)/g,
+    /getByLabel\(['"](.*?)['"]\)/g,
+    /getByTestId\(['"](.*?)['"]\)/g,
+    /getByPlaceholder\(['"](.*?)['"]\)/g
+  ];
+
+  selectorPatterns.forEach(pattern => {
+    let match;
+    while ((match = pattern.exec(testCode)) !== null) {
+      const selector = match[1];
+      if (selector && !analysis.currentSelectors.includes(selector)) {
+        analysis.currentSelectors.push(selector);
+      }
+    }
+  });
+
+  // Identify element intents based on text patterns and actions
+  const intentPatterns = [
+    { text: /movie|film|title/i, intent: 'movie_card', resilientSelectors: ['getByRole("link")', 'getByText(/pattern/i)', 'getByTestId("movie-card")'] },
+    { text: /book|reserve|checkout|purchase/i, intent: 'booking_button', resilientSelectors: ['getByRole("button", { name: /book/i })', 'getByText(/book/i)', 'getByTestId("book-button")'] },
+    { text: /avengers|movie\s*name/i, intent: 'movie_title', resilientSelectors: ['getByText(/movie\s*name/i)', 'getByRole("heading")', 'getByTestId("movie-title")'] },
+    { text: /seat|grid|theater|screen/i, intent: 'seat_grid', resilientSelectors: ['getByTestId("seat-grid")', 'getByRole("region")', '.seat-container'] },
+    { text: /user.*detail|profile|name|email|phone/i, intent: 'user_form', resilientSelectors: ['getByLabel(/name/i)', 'getByPlaceholder(/name/i)', 'getByTestId("user-form")'] },
+    { text: /payment|checkout|confirm/i, intent: 'payment_section', resilientSelectors: ['getByRole("heading", { name: /payment/i })', 'getByText(/confirm/i)', 'getByTestId("payment-form")'] }
+  ];
+
+  intentPatterns.forEach(({ text, intent, resilientSelectors }) => {
+    if (text.test(testCode)) {
+      analysis.elementIntents.push({ intent, resilientSelectors });
+    }
+  });
+
+  return analysis;
+}
+
+/**
+ * Generate selector recommendation guidance based on test context
+ */
+function generateSelectorGuidance(testCode) {
+  const analysis = analyzeTestIntentAndSelectors(testCode);
+  if (!analysis || analysis.elementIntents.length === 0) return '';
+
+  let guidance = '\n### Selector Resilience Strategy Based on Test Intent:\n';
+  
+  analysis.elementIntents.forEach(({ intent, resilientSelectors }) => {
+    guidance += `\n**For ${intent} elements:**\n`;
+    resilientSelectors.forEach((selector, idx) => {
+      guidance += `  ${idx + 1}. Preferred: \`${selector}\`\n`;
+    });
+  });
+
+  guidance += `\n### Implementation Priority:\n`;
+  guidance += `1. **First priority**: Use getByRole() for interactive elements (buttons, links, etc.)\n`;
+  guidance += `2. **Second priority**: Use getByLabel(), getByPlaceholder() for form inputs\n`;
+  guidance += `3. **Third priority**: Use getByText() for content matching\n`;
+  guidance += `4. **Last resort**: Use data-testid attributes if available\n`;
+  guidance += `5. **Avoid**: Class-based selectors (.Mui*) that break on version changes\n`;
+
+  return guidance;
+}
+
+/**
  * Generate comprehensive analysis prompt for Gemini with security sanitization
  */
 function generateAnalysisPrompt(testInfo, testCode) {
@@ -1033,13 +1136,19 @@ function generateAnalysisPrompt(testInfo, testCode) {
   const sanitizedError = sanitizeErrorMessage(testInfo.error, 1500);
   const sanitizedTestCode = sanitizeForPrompt(testCode, 40000);
   
-  return `You are an expert Playwright test automation engineer. Analyze this failing test and provide:
+  // Generate intelligent selector guidance based on test intent
+  const selectorGuidance = generateSelectorGuidance(testCode);
+  
+  return `You are an expert Playwright test automation engineer specializing in fixing broken tests due to frontend element changes. Analyze this failing test and provide:
 
-1. **Root Cause Analysis**: Explain why the test is failing
-2. **Error Classification**: Identify the type of error (timeout, assertion, selector, etc.)
-3. **Issues Found**: List specific problems in the test code
-4. **Recommended Fixes**: Provide clear, step-by-step fixes
-5. **Fixed Code**: Provide the COMPLETE corrected test code
+1. **Root Cause Analysis**: Explain why the test is failing (element not found, changed selector, etc.)
+2. **Error Classification**: Identify the type of error (timeout, assertion, selector_not_found, etc.)
+3. **Element Intent Detection**: What element is the test trying to interact with and what is its purpose?
+4. **Selector Analysis**: 
+   - Identify brittle selectors (class-based, nth positioning)
+   - Suggest resilient alternatives that survive frontend updates
+5. **Recommended Fixes**: Provide clear, step-by-step fixes prioritizing selector resilience
+6. **Fixed Code**: Provide the COMPLETE corrected test code
 
 CRITICAL: You MUST provide the complete fixed test code inside a TypeScript code block.
 The code block MUST include all imports, the complete test function, and closing braces.
@@ -1055,16 +1164,47 @@ Current Test Code:
 \`\`\`typescript
 ${sanitizedTestCode}
 \`\`\`
+${selectorGuidance}
 
 Analysis Focus Areas:
-- Playwright selectors (CSS, role-based, text-based)
-- Material-UI component selectors (.MuiBox-root, .MuiPaper-root, etc.)
-- Timing and async operations (waitForNavigation, waitForLoadState, etc.)
-- Test data assumptions and brittleness
-- Accessibility-first selectors (getByRole, getByLabel, etc.)
-- Strict mode violations (locators matching multiple elements)
+- **Selector Resilience** (PRIMARY FOCUS):
+  * Identify what element should be selected (button, link, input, div, etc.)
+  * Detect if current selector uses Material-UI class names (.Mui*)
+  * Replace with semantic/accessible selectors that don't break on frontend updates
+  * Use element role-based matching for interactive elements
+  * Use text matching for buttons/links with visible labels
+  * Use data-testid for elements that need unique identification
 
-IMPORTANT: Always output the COMPLETE fixed code in a code block, never truncate it.`;
+- **Material-UI Component Selector Resilience - Two-Way Fix Strategy**:
+  
+  **WAY 1: Brittle Selectors **
+  * .MuiBox-root, .MuiPaper-root, .MuiCard-root, .MuiButton-root
+  * Combining multiple Mui classes
+  * nth() positioning
+  
+  **WAY 2: Resilient Selectors (PREFER - Survive Frontend Updates)**
+  * getByRole() - MOST RESILIENT
+  * getByText()
+  * getByLabel()
+  * getByTestId()
+  * getByPlaceholder()
+  * Filter by text/role
+  
+  **INSTRUCTION**: When fixing test selectors, identify any WAY 1 patterns and replace them with appropriate WAY 2 selectors to ensure test resilience across Material-UI version upgrades.
+
+- Timing and async operations (waitForNavigation, waitForLoadState, waitForURL, etc.)
+- Test data assumptions and brittleness (hardcoded values, assumptions about DOM structure)
+- Accessibility-first selectors (getByRole, getByLabel, getByPlaceholder)
+- Strict mode violations (locators matching multiple elements when expecting one)
+- Frontend version upgrade compatibility: Use selectors that survive Material-UI v5→v6→v7+ updates
+
+IMPORTANT: 
+1. Always output the COMPLETE fixed code in a code block, never truncate it
+2. PRIORITIZE resilient selectors over Material-UI class names - this is the primary goal
+3. If error indicates missing elements, the selector likely changed in frontend - suggest robust alternatives
+4. Test code should work across multiple Material-UI versions without changes
+5. When fixing, prefer this priority: getByRole > getByText > getByLabel > getByTestId > data attributes > text content
+6. NEVER suggest using .querySelector with class names for Material-UI components`;
 }
 
 /**
@@ -1075,7 +1215,7 @@ async function analyzeWithGemini(testInfo, testCode, retryCount = 0) {
     await rateLimitAndWait();
     
     const model = genAI.getGenerativeModel({
-      model: 'gemini-2.5-flash-lite'
+      model: 'gemini-2.5-flash'
     });
 
     const prompt = generateAnalysisPrompt(testInfo, testCode);
@@ -1160,6 +1300,41 @@ function extractFixedCode(geminiResponse) {
   }
 
   return null;
+}
+
+/**
+ * Extract locators from test code (both page.locator and getBy* patterns)
+ */
+function extractLocatorsFromCode(code) {
+  if (!code) return { failed: [], working: [] };
+  
+  const locators = {
+    failed: [],
+    working: []
+  };
+  
+  // Match various selector patterns
+  const patterns = [
+    /page\.locator\(['"](.*?)['"]\)/g,
+    /page\.locator\(`(.*?)`\)/g,
+    /getByRole\(['"](.*?)['"][^)]*\)/g,
+    /getByLabel\(['"](.*?)['"]\)/g,
+    /getByText\(['"](.*?)['"]\)/g,
+    /getByTestId\(['"](.*?)['"]\)/g,
+    /locator\(['"](.*?)['"]\)/g
+  ];
+  
+  patterns.forEach(pattern => {
+    let match;
+    while ((match = pattern.exec(code)) !== null) {
+      const locator = match[1];
+      if (locator && locator.trim() && !locators.working.includes(locator)) {
+        locators.working.push(locator);
+      }
+    }
+  });
+  
+  return locators;
 }
 
 /**
@@ -1501,7 +1676,10 @@ async function heal() {
   console.log(`⚙️  Configuration:`);
   console.log(`   Auto-Fix: ${options.autoFix ? '✅ Enabled' : '❌ Disabled'}`);
   console.log(`   Verbose: ${options.verbose ? '✅ Enabled' : '❌ Disabled'}`);
-  console.log(`   API Key: ${GEMINI_API_KEY ? '✅ Configured' : '❌ Missing'}\n`);
+  console.log(`   API Key: ${GEMINI_API_KEY_TEST ? '✅ Configured' : '❌ Missing'}\n`);
+
+  // Cleanup old reports before starting new healing session
+  cleanupOldReports();
 
   console.log('📊 Analyzing test failures...\n');
   let failedTests = getFailedTests();
@@ -1595,8 +1773,14 @@ async function heal() {
           testResult.fixed = true;
           healingResults.fixedCount++;
 
-          // Log successful fix application
-          logHealingEvent('element_healed', test.title, 'original_locator', 'fixed_locator', {
+          // Extract actual locators from the code
+          const originalLocators = extractLocatorsFromCode(testCode);
+          const fixedLocators = extractLocatorsFromCode(fixedCode);
+          const failedLocator = originalLocators.working.length > 0 ? originalLocators.working[0] : 'selector not identified';
+          const workingLocator = fixedLocators.working.length > 0 ? fixedLocators.working[0] : 'selector not identified';
+
+          // Log successful fix application with actual locators
+          logHealingEvent('element_healed', test.title, failedLocator, workingLocator, {
             filePath: test.filePath,
             status: 'applied'
           });

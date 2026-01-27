@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Gemini Healer - HTML Report Generator (Enhanced)
+ * Gemini Healer - HTML Report Generator (Enhanced with Tabs)
  * Generates professional HTML reports with improved styling and interactivity
  * Color Scheme: Navy Blue (#1e3a8a), Green (#10b981), Grey (#6b7280)
  */
@@ -80,42 +80,57 @@ function loadHealingLogs() {
 }
 
 /**
- * Generate locator healing summary HTML
+ * Extract locator changes from healing logs
  */
-function generateLocatorSummary(healingLogs) {
-  if (!healingLogs || !healingLogs.events) return '';
-
-  const locatorEvents = healingLogs.events.filter(e => 
-    e.eventType === 'locator_failure' || e.eventType === 'locator_found'
-  );
-
-  if (locatorEvents.length === 0) return '';
-
-  const locatorHeals = {};
-  locatorEvents.forEach(event => {
-    const key = event.elementName || 'Unknown';
-    if (!locatorHeals[key]) {
-      locatorHeals[key] = [];
+function extractLocatorChanges(healingLogs) {
+  if (!healingLogs || !healingLogs.events) return [];
+  
+  const changes = [];
+  const processedElements = new Set();
+  
+  healingLogs.events.forEach(event => {
+    if ((event.eventType === 'element_healed' || event.eventType === 'locator_failure' || event.eventType === 'locator_found') && 
+        event.elementName && event.workingLocator && event.failedLocator) {
+      const key = `${event.elementName}|${event.failedLocator}`;
+      if (!processedElements.has(key)) {
+        processedElements.add(key);
+        changes.push({
+          elementName: event.elementName,
+          failedLocator: event.failedLocator,
+          workingLocator: event.workingLocator,
+          timestamp: event.timestamp,
+          duration: event.duration
+        });
+      }
     }
-    locatorHeals[key].push(event);
   });
+  
+  return changes;
+}
 
-  return Object.entries(locatorHeals).map(([elementName, events]) => `
-    <div class="locator-heal-item">
-      <div class="locator-header">
-        <strong style="color: var(--navy);">🎯 ${escapeHtmlNode(elementName)}</strong>
-      </div>
-      <div style="margin-top: 10px; padding: 12px; background: var(--grey-light); border-radius: 4px;">
-        ${events.map(event => `
-          <div style="margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--grey-border);">
-            <div><strong>❌ Failed:</strong> <code style="background: #fee2e2; padding: 4px 8px; border-radius: 3px; font-size: 0.9em;">${escapeHtmlNode(event.failedLocator)}</code></div>
-            <div style="margin-top: 5px;"><strong>✅ Working:</strong> <code style="background: #d1fae5; padding: 4px 8px; border-radius: 3px; font-size: 0.9em;">${escapeHtmlNode(event.workingLocator)}</code></div>
-            <div style="margin-top: 5px; font-size: 0.85em; color: var(--grey);">🕐 ${new Date(event.timestamp).toLocaleTimeString()}</div>
-          </div>
-        `).join('')}
-      </div>
-    </div>
-  `).join('');
+/**
+ * Extract error patterns from test results
+ */
+function extractErrorPatterns(tests) {
+  const patterns = {};
+  
+  tests.forEach(test => {
+    const errorType = test.errorType || 'Unknown Error';
+    if (!patterns[errorType]) {
+      patterns[errorType] = {
+        count: 0,
+        tests: [],
+        examples: []
+      };
+    }
+    patterns[errorType].count++;
+    patterns[errorType].tests.push(test.title);
+    if (patterns[errorType].examples.length < 2) {
+      patterns[errorType].examples.push(test.error?.substring(0, 200) || '');
+    }
+  });
+  
+  return patterns;
 }
 
 /**
@@ -131,6 +146,8 @@ function generateHtmlReport(healingResults) {
 
   // Load healing logs if available
   const healingLogs = loadHealingLogs();
+  const locatorChanges = extractLocatorChanges(healingLogs);
+  const errorPatterns = extractErrorPatterns(healingResults.tests);
 
   const htmlContent = `<!DOCTYPE html>
 <html lang="en">
@@ -169,7 +186,7 @@ function generateHtmlReport(healingResults) {
         }
 
         .container {
-            max-width: 1200px;
+            max-width: 1400px;
             margin: 0 auto;
             background: #1e3a8a;
             border-radius: 8px;
@@ -446,73 +463,287 @@ function generateHtmlReport(healingResults) {
             border-color: var(--border-success);
         }
 
-        .locator-heal-item {
+        .verification-box {
+            border-radius: 6px;
+            padding: 15px;
+            margin-top: 15px;
+            text-align: center;
+            font-weight: 600;
+        }
+
+        .verification-box.success {
+            background: var(--bg-success);
+            border: 1px solid var(--border-success);
+            color: #047857;
+        }
+
+        .verification-box.warning {
+            background: #fef3c7;
+            border: 1px solid #fcd34d;
+            color: #92400e;
+        }
+
+        .verification-box.error {
+            background: var(--bg-error);
+            border: 1px solid var(--border-error);
+            color: #991b1b;
+        }
+
+        .footer {
+            background: #0f172a;
+            border-top: 3px solid #0d9488;
+            padding: 25px 40px;
+            text-align: center;
+            color: var(--white);
+            font-size: 0.9em;
+        }
+
+        .footer p {
+            margin: 8px 0;
+        }
+
+        /* TAB STYLING */
+        .tabs-container {
+            display: flex;
+            border-bottom: 3px solid #0d9488;
+            gap: 0;
+            margin-bottom: 30px;
+            background: var(--grey-light);
+            border-radius: 8px 8px 0 0;
+            overflow: hidden;
+            flex-wrap: wrap;
+        }
+
+        .tab-button {
+            flex: 1;
+            min-width: 120px;
+            padding: 16px 20px;
+            border: none;
+            background: var(--grey-light);
+            color: var(--text-secondary);
+            font-weight: 600;
+            cursor: pointer;
+            font-size: 0.9em;
+            transition: all 0.3s ease;
+            border-bottom: 3px solid transparent;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            user-select: none;
+        }
+
+        .tab-button:hover {
+            background: #e5e7eb;
+            color: var(--navy);
+        }
+
+        .tab-button.active {
+            background: var(--white);
+            color: var(--navy);
+            border-bottom-color: #0d9488;
+            box-shadow: 0 -2px 8px rgba(13, 148, 136, 0.1);
+        }
+
+        .tab-content {
+            display: none;
+            animation: fadeIn 0.3s ease-in;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .locator-fix-grid {
+            display: grid;
+            gap: 15px;
+        }
+
+        .locator-fix-card {
             background: var(--white);
             border: 1px solid var(--grey-border);
             border-radius: 6px;
+            overflow: hidden;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+        }
+
+        .locator-fix-header {
+            background: linear-gradient(135deg, #0d9488 0%, #14b8a6 100%);
+            color: var(--white);
+            padding: 15px 20px;
+            font-weight: 600;
+        }
+
+        .locator-fix-body {
+            padding: 20px;
+        }
+
+        .locator-comparison {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-top: 15px;
+        }
+
+        .comparison-column {
+            border-radius: 6px;
             padding: 15px;
-            margin-bottom: 15px;
-            transition: box-shadow 0.2s;
-        }
-
-        .locator-heal-item:hover {
-            box-shadow: 0 4px 12px rgba(30, 58, 138, 0.08);
-        }
-
-        .locator-header {
-            padding: 10px 0;
-            border-bottom: 2px solid var(--navy);
-            margin-bottom: 12px;
-        }
-
-        .log-entry {
-            padding: 12px;
-            margin: 8px 0;
-            background: #f9fafb;
-            border-left: 4px solid var(--navy);
-            border-radius: 4px;
             font-family: 'Courier New', 'Monaco', 'Menlo', monospace;
             font-size: 0.85em;
             line-height: 1.6;
+            word-break: break-all;
+            white-space: pre-wrap;
         }
 
-        .log-entry.failure {
-            border-left-color: #ef4444;
-            background: #fef2f2;
+        .comparison-column.failed {
+            background: var(--bg-error);
+            border: 1px solid var(--border-error);
+            color: #991b1b;
         }
 
-        .log-entry.success {
-            border-left-color: var(--green);
-            background: #f0fdf4;
+        .comparison-column.working {
+            background: var(--bg-success);
+            border: 1px solid var(--border-success);
+            color: #047857;
         }
 
-        .log-stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 15px;
-            margin-bottom: 20px;
-        }
-
-        .log-stat-card {
-            background: var(--grey-light);
-            border-radius: 6px;
-            padding: 15px;
-            text-align: center;
-            border: 1px solid var(--grey-border);
-        }
-
-        .log-stat-card h4 {
-            color: var(--navy);
+        .comparison-label {
+            font-weight: 600;
             margin-bottom: 8px;
+            display: block;
             font-size: 0.9em;
+        }
+
+        .error-pattern-card {
+            background: var(--white);
+            border-left: 5px solid #ef4444;
+            border-radius: 6px;
+            padding: 20px;
+            margin-bottom: 15px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+        }
+
+        .error-pattern-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid var(--grey-border);
+        }
+
+        .error-pattern-title {
+            color: var(--navy);
+            font-weight: 600;
+            font-size: 1.05em;
+        }
+
+        .error-count-badge {
+            background: #ef4444;
+            color: var(--white);
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 0.9em;
+        }
+
+        .error-tests-list {
+            margin-bottom: 12px;
+        }
+
+        .error-tests-list strong {
+            color: var(--navy);
+            display: block;
+            margin-bottom: 8px;
+        }
+
+        .error-test-item {
+            padding: 6px 12px;
+            background: var(--grey-light);
+            margin: 6px 0;
+            border-radius: 4px;
+            font-size: 0.9em;
+            border-left: 3px solid #ef4444;
+        }
+
+        .error-example {
+            background: var(--bg-error);
+            border: 1px solid var(--border-error);
+            padding: 12px;
+            border-radius: 4px;
+            font-family: 'Courier New', 'Monaco', 'Menlo', monospace;
+            font-size: 0.85em;
+            color: #991b1b;
+            line-height: 1.6;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+
+        .selector-showcase {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 15px;
+        }
+
+        .selector-card {
+            background: var(--white);
+            border: 1px solid var(--grey-border);
+            border-radius: 6px;
+            overflow: hidden;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+        }
+
+        .selector-card-header {
+            background: var(--grey-light);
+            padding: 12px 15px;
+            border-bottom: 2px solid var(--navy);
+            font-weight: 600;
+            color: var(--navy);
+        }
+
+        .selector-card-body {
+            padding: 15px;
+        }
+
+        .selector-type {
+            display: inline-block;
+            background: var(--navy);
+            color: var(--white);
+            padding: 4px 8px;
+            border-radius: 3px;
+            font-size: 0.75em;
+            font-weight: 600;
+            margin-bottom: 10px;
             text-transform: uppercase;
             letter-spacing: 0.5px;
         }
 
-        .log-stat-card .value {
-            font-size: 1.8em;
-            font-weight: bold;
-            color: var(--green);
+        .selector-code {
+            background: #f9fafb;
+            border: 1px solid var(--grey-border);
+            padding: 12px;
+            border-radius: 4px;
+            font-family: 'Courier New', 'Monaco', 'Menlo', monospace;
+            font-size: 0.85em;
+            word-break: break-all;
+            line-height: 1.6;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .selector-usage {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid var(--grey-border);
+            font-size: 0.9em;
+            color: var(--text-secondary);
+        }
+
+        .selector-usage strong {
+            color: var(--navy);
         }
 
         .suite-group {
@@ -543,28 +774,6 @@ function generateHtmlReport(healingResults) {
 
         .test-item-line:last-child {
             border-bottom: none;
-        }
-
-        .test-item-bullet {
-            display: flex;
-            padding: 10px 0;
-            border-bottom: 1px solid var(--grey-border);
-        }
-
-        .test-item-bullet:last-child {
-            border-bottom: none;
-        }
-
-        .bullet-point {
-            margin-right: 12px;
-            color: #0d9488;
-            font-weight: bold;
-            min-width: 20px;
-        }
-
-        .bullet-content {
-            flex: 1;
-            word-break: break-word;
         }
 
         .code-line {
@@ -614,7 +823,6 @@ function generateHtmlReport(healingResults) {
             margin-top: 4px;
         }
 
-        /* Syntax highlighting classes */
         .error-kw {
             color: #991b1b;
             font-weight: bold;
@@ -650,46 +858,35 @@ function generateHtmlReport(healingResults) {
             font-weight: normal;
         }
 
-        .verification-box {
+        .log-stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .log-stat-card {
+            background: var(--grey-light);
             border-radius: 6px;
             padding: 15px;
-            margin-top: 15px;
             text-align: center;
-            font-weight: 600;
+            border: 1px solid var(--grey-border);
         }
 
-        .verification-box.success {
-            background: var(--bg-success);
-            border: 1px solid var(--border-success);
-            color: #047857;
-        }
-
-        .verification-box.warning {
-            background: #fef3c7;
-            border: 1px solid #fcd34d;
-            color: #92400e;
-        }
-
-        .verification-box.error {
-            background: var(--bg-error);
-            border: 1px solid var(--border-error);
-            color: #991b1b;
-        }
-
-        .footer {
-            background: #0f172a;
-            border-top: 3px solid #0d9488;
-            padding: 25px 40px;
-            text-align: center;
-            color: var(--white);
+        .log-stat-card h4 {
+            color: var(--navy);
+            margin-bottom: 8px;
             font-size: 0.9em;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
 
-        .footer p {
-            margin: 8px 0;
+        .log-stat-card .value {
+            font-size: 1.8em;
+            font-weight: bold;
+            color: var(--green);
         }
 
-        /* Scrollbar styling */
         ::-webkit-scrollbar {
             width: 8px;
             height: 8px;
@@ -708,7 +905,6 @@ function generateHtmlReport(healingResults) {
             background: var(--navy);
         }
 
-        /* Responsive design */
         @media (max-width: 768px) {
             .header h1 {
                 font-size: 1.8em;
@@ -718,6 +914,13 @@ function generateHtmlReport(healingResults) {
             }
             .summary {
                 grid-template-columns: 1fr;
+            }
+            .locator-comparison {
+                grid-template-columns: 1fr;
+            }
+            .tab-button {
+                font-size: 0.75em;
+                min-width: 100px;
             }
         }
     </style>
@@ -733,190 +936,280 @@ function generateHtmlReport(healingResults) {
         </div>
 
         <div class="content">
-            <div class="summary">
-                <div class="stat-card">
-                    <p>Tests Analyzed</p>
-                    <h3>${healingResults.totalTests}</h3>
-                </div>
-                <div class="stat-card success">
-                    <p>Tests Fixed</p>
-                    <h3>${healingResults.fixedCount}</h3>
-                </div>
-                <div class="stat-card success">
-                    <p>Tests Verified</p>
-                    <h3>${healingResults.verifiedCount}</h3>
-                </div>
-                <div class="stat-card">
-                    <p>Success Rate</p>
-                    <h3>${healingResults.successRate}%</h3>
-                </div>
+            <!-- TAB NAVIGATION -->
+            <div class="tabs-container">
+                <button class="tab-button active" onclick="switchTab(event, 'overview')">📊 Overview</button>
+                <button class="tab-button" onclick="switchTab(event, 'locators')">🔧 Locator Changes</button>
+                <button class="tab-button" onclick="switchTab(event, 'errors')">⚠️ Error Patterns</button>
+                <button class="tab-button" onclick="switchTab(event, 'selectors')">🎯 Selectors</button>
+                <button class="tab-button" onclick="switchTab(event, 'results')">📋 Test Results</button>
             </div>
 
-            <div class="results">
-                <h2>📋 Test Results</h2>
-                ${(() => {
-                    // Group tests by file/suite
-                    const suites = {};
-                    healingResults.tests.forEach(test => {
-                        const suite = test.file || 'Unknown Suite';
-                        if (!suites[suite]) {
-                            suites[suite] = [];
-                        }
-                        suites[suite].push(test);
-                    });
+            <!-- TAB 1: OVERVIEW -->
+            <div id="overview" class="tab-content active">
+                <div class="summary">
+                    <div class="stat-card">
+                        <p>Tests Analyzed</p>
+                        <h3>${healingResults.totalTests}</h3>
+                    </div>
+                    <div class="stat-card success">
+                        <p>Tests Fixed</p>
+                        <h3>${healingResults.fixedCount}</h3>
+                    </div>
+                    <div class="stat-card success">
+                        <p>Tests Verified</p>
+                        <h3>${healingResults.verifiedCount}</h3>
+                    </div>
+                    <div class="stat-card">
+                        <p>Success Rate</p>
+                        <h3>${healingResults.successRate}%</h3>
+                    </div>
+                </div>
 
-                    // Generate HTML for each suite
-                    return Object.entries(suites).map(([suite, tests]) => `
-                        <div class="suite-group">
-                            <div class="suite-header">📦 ${suite}</div>
-                            <div class="suite-tests">
-                                ${tests.map((test, testIdx) => {
-                                    const statusClass = test.verified ? 'success' : 'failed';
-                                    const statusText = test.verified ? '✅ FIXED & VERIFIED' : test.fixed ? '⚠️ FIXED (UNVERIFIED)' : '❌ NOT FIXED';
-                                    const statusBadgeClass = test.verified ? 'success' : test.fixed ? 'warning' : 'failed';
-                                    const errorPreview = test.error || 'No error details available';
-                                    const analysisPreview = test.analysis || 'No analysis available';
+                <div class="results" style="margin-top: 30px;">
+                    <h2>📈 Session Summary</h2>
+                    <div style="background: var(--grey-light); padding: 20px; border-radius: 6px; border-left: 5px solid var(--navy); line-height: 2;">
+                        <p><strong style="color: var(--navy);">Session Duration:</strong> <span style="color: var(--grey);">${healingResults.duration}</span></p>
+                        <p><strong style="color: var(--navy);">Total Tests Analyzed:</strong> <span style="color: var(--grey);">${healingResults.totalTests}</span></p>
+                        <p><strong style="color: var(--navy);">Tests Fixed:</strong> <span style="color: var(--green);">${healingResults.fixedCount}</span></p>
+                        <p><strong style="color: var(--navy);">Tests Verified:</strong> <span style="color: var(--green);">${healingResults.verifiedCount}</span></p>
+                        <p><strong style="color: var(--navy);">Success Rate:</strong> <span style="color: var(--green);">${healingResults.successRate}%</span></p>
+                        <p><strong style="color: var(--navy);">Generated:</strong> <span style="color: var(--grey);">${new Date().toLocaleString()}</span></p>
+                    </div>
+                </div>
 
-                                    return `
-                                        <div class="test-result ${statusClass}" data-test-id="${testIdx}">
-                                            <div class="test-header">
-                                                <div>
-                                                    <span class="status-badge ${statusBadgeClass}">${statusText}</span>
-                                                    <span class="test-title">${test.title}</span>
-                                                </div>
-                                                <span class="expand-icon">▶</span>
+                ${healingLogs ? `
+                <div class="results" style="margin-top: 30px;">
+                    <h2>📊 Healing Statistics</h2>
+                    <div class="log-stats-grid">
+                        <div class="log-stat-card">
+                            <h4>Total Events</h4>
+                            <div class="value">${healingLogs.statistics?.totalEvents || 0}</div>
+                        </div>
+                        <div class="log-stat-card">
+                            <h4>Failed Locators</h4>
+                            <div class="value">${healingLogs.statistics?.failedLocators || 0}</div>
+                        </div>
+                        <div class="log-stat-card">
+                            <h4>Working Locators</h4>
+                            <div class="value">${healingLogs.statistics?.workedLocators || 0}</div>
+                        </div>
+                        <div class="log-stat-card">
+                            <h4>Elements Healed</h4>
+                            <div class="value">${healingLogs.statistics?.elementsHealed || 0}</div>
+                        </div>
+                    </div>
+                </div>
+                ` : ''}
+            </div>
+
+            <!-- TAB 2: LOCATOR CHANGES -->
+            <div id="locators" class="tab-content">
+                <div class="results">
+                    <h2>🔧 Locator Changes Applied</h2>
+                    ${locatorChanges.length > 0 ? `
+                        <div class="locator-fix-grid">
+                            ${locatorChanges.map((change, idx) => `
+                                <div class="locator-fix-card">
+                                    <div class="locator-fix-header">
+                                        <div>Element ${idx + 1}: <strong>${escapeHtmlNode(change.elementName)}</strong></div>
+                                        <div style="font-size: 0.85em; margin-top: 5px; opacity: 0.9;">Fixed at ${new Date(change.timestamp).toLocaleTimeString()}</div>
+                                    </div>
+                                    <div class="locator-fix-body">
+                                        <div class="locator-comparison">
+                                            <div>
+                                                <span class="comparison-label">❌ Failed Locator</span>
+                                                <div class="comparison-column failed">${escapeHtmlNode(change.failedLocator)}</div>
                                             </div>
-                                            <div class="test-content">
-                                                <div style="margin-bottom: 20px; padding-bottom: 15px; border-bottom: 1px solid var(--grey-border);">
-                                                    <strong style="color: var(--navy);">Test Name:</strong> ${test.title}
-                                                    <br><strong style="color: var(--navy); margin-top: 8px; display: block;">Error Type:</strong> <span style="color: var(--grey);">${test.errorType}</span>
-                                                </div>
-
-                                                <div class="subsection expanded">
-                                                    <div class="subsection-header" onclick="toggleSubsection(this)">
-                                                        <span><span class="subsection-icon">▶</span>❌ Error Details</span>
-                                                    </div>
-                                                    <div class="subsection-content">
-                                                        <div class="error-text">${formatCodeWithLineNumbers(errorPreview, 'error', 100)}</div>
-                                                    </div>
-                                                </div>
-
-                                                ${test.analysis ? `
-                                                <div class="subsection">
-                                                    <div class="subsection-header" onclick="toggleSubsection(this)">
-                                                        <span><span class="subsection-icon">▶</span>🤖 AI Analysis</span>
-                                                    </div>
-                                                    <div class="subsection-content">
-                                                        <div style="padding: 10px; border-radius: 4px;">
-                                                            ${escapeHtmlNode(analysisPreview).split('\n').map(line => 
-                                                                line.trim() ? `<div class="test-item-line">• ${line}</div>` : ''
-                                                            ).join('')}
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                                ` : ''}
-
-                                                ${test.fixedCode ? `
-                                                <div class="subsection">
-                                                    <div class="subsection-header" onclick="toggleSubsection(this)">
-                                                        <span><span class="subsection-icon">▶</span>✅ ${test.fixed ? 'Applied' : 'Suggested'} Fix</span>
-                                                    </div>
-                                                    <div class="subsection-content">
-                                                        <div class="fix-text">${formatCodeWithLineNumbers(test.fixedCode, 'fix', 100)}</div>
-                                                    </div>
-                                                </div>
-                                                ` : ''}
-
-                                                ${test.verified ? `
-                                                <div class="verification-box success">
-                                                    ✅ Test Re-run Passed - Error has been resolved!
-                                                </div>
-                                                ` : test.fixed ? `
-                                                <div class="verification-box warning">
-                                                    ⚠️ Fix Applied - Manual verification recommended
-                                                </div>
-                                                ` : `
-                                                <div class="verification-box error">
-                                                    ❌ Unable to fix this test - Review error details
-                                                </div>
-                                                `}
+                                            <div>
+                                                <span class="comparison-label">✅ Working Locator</span>
+                                                <div class="comparison-column working">${escapeHtmlNode(change.workingLocator)}</div>
                                             </div>
                                         </div>
-                                    `;
-                                }).join('')}
-                            </div>
+                                        ${change.duration ? `
+                                            <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--grey-border); font-size: 0.9em; color: var(--text-secondary);">
+                                                ⏱️ Resolution time: <strong>${change.duration}ms</strong>
+                                            </div>
+                                        ` : ''}
+                                    </div>
+                                </div>
+                            `).join('')}
                         </div>
-                    `).join('');
-                })()}
-            </div>
-
-            <div class="results">
-                <h2>📊 Session Summary</h2>
-                <div style="background: var(--grey-light); padding: 20px; border-radius: 6px; border-left: 5px solid var(--navy); line-height: 2;">
-                    <p><strong style="color: var(--navy);">Session Duration:</strong> <span style="color: var(--grey);">${healingResults.duration}</span></p>
-                    <p><strong style="color: var(--navy);">Total Tests Analyzed:</strong> <span style="color: var(--grey);">${healingResults.totalTests}</span></p>
-                    <p><strong style="color: var(--navy);">Tests Fixed:</strong> <span style="color: var(--green);">${healingResults.fixedCount}</span></p>
-                    <p><strong style="color: var(--navy);">Tests Verified:</strong> <span style="color: var(--green);">${healingResults.verifiedCount}</span></p>
-                    <p><strong style="color: var(--navy);">Success Rate:</strong> <span style="color: var(--green);">${healingResults.successRate}%</span></p>
-                    <p><strong style="color: var(--navy);">Generated:</strong> <span style="color: var(--grey);">${new Date().toLocaleString()}</span></p>
-                </div>
-            </div>
-
-            ${healingLogs ? `
-            <div class="results">
-                <h2>📝 Healing Events Log</h2>
-                
-                <div class="log-stats-grid">
-                    <div class="log-stat-card">
-                        <h4>Total Events</h4>
-                        <div class="value">${healingLogs.statistics?.totalEvents || 0}</div>
-                    </div>
-                    <div class="log-stat-card">
-                        <h4>Failed Locators</h4>
-                        <div class="value">${healingLogs.statistics?.failedLocators || 0}</div>
-                    </div>
-                    <div class="log-stat-card">
-                        <h4>Working Locators</h4>
-                        <div class="value">${healingLogs.statistics?.workedLocators || 0}</div>
-                    </div>
-                    <div class="log-stat-card">
-                        <h4>Elements Healed</h4>
-                        <div class="value">${healingLogs.statistics?.elementsHealed || 0}</div>
-                    </div>
-                </div>
-
-                <h3 style="color: var(--navy); margin-top: 25px; margin-bottom: 15px; border-bottom: 2px solid var(--navy); padding-bottom: 10px;">
-                    🎯 Locator Healing Details
-                </h3>
-                ${generateLocatorSummary(healingLogs) || '<p style="color: var(--grey); font-style: italic;">No locator healing events recorded.</p>'}
-
-                <h3 style="color: var(--navy); margin-top: 25px; margin-bottom: 15px; border-bottom: 2px solid var(--navy); padding-bottom: 10px;">
-                    📋 Event Timeline
-                </h3>
-                <div style="max-height: 600px; overflow-y: auto;">
-                    ${healingLogs.events?.length > 0 ? healingLogs.events.map(event => `
-                        <div class="log-entry ${event.eventType.includes('failure') ? 'failure' : 'success'}">
-                            <div><strong>[${event.eventType.toUpperCase()}]</strong> ${new Date(event.timestamp).toLocaleTimeString()}</div>
-                            <div style="margin-top: 5px; color: var(--text-secondary); font-size: 0.9em;">
-                                <span>📌 Element: <strong>${escapeHtmlNode(event.elementName || 'N/A')}</strong></span>
-                            </div>
-                            ${event.failedLocator ? `<div style="margin-top: 4px; color: #7c2d12;">❌ Failed: ${escapeHtmlNode(event.failedLocator)}</div>` : ''}
-                            ${event.workingLocator ? `<div style="margin-top: 4px; color: #047857;">✅ Working: ${escapeHtmlNode(event.workingLocator)}</div>` : ''}
-                            ${event.duration ? `<div style="margin-top: 4px; color: var(--grey); font-size: 0.85em;">⏱️ Duration: ${event.duration}ms</div>` : ''}
+                    ` : `
+                        <div class="verification-box success" style="text-align: center; padding: 30px;">
+                            ✅ No locator changes needed - All selectors working correctly!
                         </div>
-                    `).join('') : '<p style="color: var(--grey); font-style: italic;">No events recorded.</p>'}
-                </div>
-
-                <div style="margin-top: 15px; padding: 15px; background: #f9fafb; border-radius: 6px; border-left: 4px solid var(--navy);">
-                    <strong style="color: var(--navy);">Session Info:</strong>
-                    <div style="margin-top: 8px; font-size: 0.9em; color: var(--grey); font-family: 'Courier New', monospace;">
-                        <div>Session ID: ${escapeHtmlNode(healingLogs.sessionId || 'N/A')}</div>
-                        <div>Started: ${new Date(healingLogs.startTime).toLocaleString()}</div>
-                        ${healingLogs.endTime ? `<div>Ended: ${new Date(healingLogs.endTime).toLocaleString()}</div>` : ''}
-                    </div>
+                    `}
                 </div>
             </div>
-            ` : ''}
+
+            <!-- TAB 3: ERROR PATTERNS -->
+            <div id="errors" class="tab-content">
+                <div class="results">
+                    <h2>⚠️ Error Patterns Analysis</h2>
+                    ${Object.keys(errorPatterns).length > 0 ? `
+                        <div>
+                            ${Object.entries(errorPatterns).map(([errorType, pattern]) => `
+                                <div class="error-pattern-card">
+                                    <div class="error-pattern-header">
+                                        <span class="error-pattern-title">${escapeHtmlNode(errorType)}</span>
+                                        <span class="error-count-badge">${pattern.count} test${pattern.count !== 1 ? 's' : ''}</span>
+                                    </div>
+                                    
+                                    <div class="error-tests-list">
+                                        <strong>Affected Tests:</strong>
+                                        ${pattern.tests.map(test => `
+                                            <div class="error-test-item">• ${escapeHtmlNode(test)}</div>
+                                        `).join('')}
+                                    </div>
+
+                                    ${pattern.examples.length > 0 ? `
+                                        <div style="margin-top: 12px;">
+                                            <strong style="color: var(--navy); display: block; margin-bottom: 8px;">Example Error:</strong>
+                                            <div class="error-example">
+                                                ${escapeHtmlNode(pattern.examples[0])}
+                                            </div>
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            `).join('')}
+                        </div>
+                    ` : `
+                        <div class="verification-box success" style="text-align: center; padding: 30px;">
+                            ✅ No error patterns detected - All tests clean!
+                        </div>
+                    `}
+                </div>
+            </div>
+
+            <!-- TAB 4: SELECTORS -->
+            <div id="selectors" class="tab-content">
+                <div class="results">
+                    <h2>🎯 All Selectors & Locators Used</h2>
+                    ${locatorChanges.length > 0 ? `
+                        <div class="selector-showcase">
+                            ${locatorChanges.map((change, idx) => `
+                                <div class="selector-card">
+                                    <div class="selector-card-header">
+                                        ${change.elementName}
+                                    </div>
+                                    <div class="selector-card-body">
+                                        <span class="selector-type">Working</span>
+                                        <div class="selector-code">${escapeHtmlNode(change.workingLocator)}</div>
+                                        <div class="selector-usage">
+                                            <strong>Element:</strong> ${escapeHtmlNode(change.elementName)}<br>
+                                            <strong>Status:</strong> ✅ Active
+                                        </div>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    ` : `
+                        <div class="verification-box warning" style="text-align: center; padding: 30px;">
+                            ℹ️ No selector data available - Run the healer to collect selector information.
+                        </div>
+                    `}
+                </div>
+            </div>
+
+            <!-- TAB 5: TEST RESULTS -->
+            <div id="results" class="tab-content">
+                <div class="results">
+                    <h2>📋 Detailed Test Results</h2>
+                    ${(() => {
+                        const suites = {};
+                        healingResults.tests.forEach(test => {
+                            const suite = test.file || 'Unknown Suite';
+                            if (!suites[suite]) {
+                                suites[suite] = [];
+                            }
+                            suites[suite].push(test);
+                        });
+
+                        return Object.entries(suites).map(([suite, tests]) => `
+                            <div class="suite-group">
+                                <div class="suite-header">📦 ${suite}</div>
+                                <div class="suite-tests">
+                                    ${tests.map((test, testIdx) => {
+                                        const statusClass = test.verified ? 'success' : 'failed';
+                                        const statusText = test.verified ? '✅ FIXED & VERIFIED' : test.fixed ? '⚠️ FIXED (UNVERIFIED)' : '❌ NOT FIXED';
+                                        const statusBadgeClass = test.verified ? 'success' : test.fixed ? 'warning' : 'failed';
+                                        const errorPreview = test.error || 'No error details available';
+                                        const analysisPreview = test.analysis || 'No analysis available';
+
+                                        return `
+                                            <div class="test-result ${statusClass}" data-test-id="${testIdx}">
+                                                <div class="test-header">
+                                                    <div>
+                                                        <span class="status-badge ${statusBadgeClass}">${statusText}</span>
+                                                        <span class="test-title">${test.title}</span>
+                                                    </div>
+                                                    <span class="expand-icon">▶</span>
+                                                </div>
+                                                <div class="test-content">
+                                                    <div style="margin-bottom: 20px; padding-bottom: 15px; border-bottom: 1px solid var(--grey-border);">
+                                                        <strong style="color: var(--navy);">Test Name:</strong> ${test.title}
+                                                        <br><strong style="color: var(--navy); margin-top: 8px; display: block;">Error Type:</strong> <span style="color: var(--grey);">${test.errorType}</span>
+                                                    </div>
+
+                                                    <div class="subsection expanded">
+                                                        <div class="subsection-header" onclick="toggleSubsection(this)">
+                                                            <span><span class="subsection-icon">▶</span>❌ Error Details</span>
+                                                        </div>
+                                                        <div class="subsection-content">
+                                                            <div class="error-text">${formatCodeWithLineNumbers(errorPreview, 'error', 100)}</div>
+                                                        </div>
+                                                    </div>
+
+                                                    ${test.analysis ? `
+                                                    <div class="subsection">
+                                                        <div class="subsection-header" onclick="toggleSubsection(this)">
+                                                            <span><span class="subsection-icon">▶</span>🤖 AI Analysis</span>
+                                                        </div>
+                                                        <div class="subsection-content">
+                                                            <div style="padding: 10px; border-radius: 4px;">
+                                                                ${escapeHtmlNode(analysisPreview).split('\n').map(line => 
+                                                                    line.trim() ? '<div class="test-item-line">• ' + line + '</div>' : ''
+                                                                ).join('')}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    ` : ''}
+
+                                                    ${test.fixedCode ? `
+                                                    <div class="subsection">
+                                                        <div class="subsection-header" onclick="toggleSubsection(this)">
+                                                            <span><span class="subsection-icon">▶</span>✅ ${test.fixed ? 'Applied' : 'Suggested'} Fix</span>
+                                                        </div>
+                                                        <div class="subsection-content">
+                                                            <div class="fix-text">${formatCodeWithLineNumbers(test.fixedCode, 'fix', 100)}</div>
+                                                        </div>
+                                                    </div>
+                                                    ` : ''}
+
+                                                    ${test.verified ? `
+                                                    <div class="verification-box success">
+                                                        ✅ Test Re-run Passed - Error has been resolved!
+                                                    </div>
+                                                    ` : test.fixed ? `
+                                                    <div class="verification-box warning">
+                                                        ⚠️ Fix Applied - Manual verification recommended
+                                                    </div>
+                                                    ` : `
+                                                    <div class="verification-box error">
+                                                        ❌ Unable to fix this test - Review error details
+                                                    </div>
+                                                    `}
+                                                </div>
+                                            </div>
+                                        `;
+                                    }).join('')}
+                                </div>
+                            </div>
+                        `).join('');
+                    })()}
+                </div>
+            </div>
         </div>
 
         <div class="footer">
@@ -926,32 +1219,45 @@ function generateHtmlReport(healingResults) {
     </div>
 
     <script>
-        // Toggle test result visibility
+        function switchTab(event, tabName) {
+            // Hide all tabs
+            const tabs = document.querySelectorAll('.tab-content');
+            tabs.forEach(tab => tab.classList.remove('active'));
+            
+            // Remove active class from all buttons
+            const buttons = document.querySelectorAll('.tab-button');
+            buttons.forEach(btn => btn.classList.remove('active'));
+            
+            // Show selected tab
+            const selectedTab = document.getElementById(tabName);
+            if (selectedTab) {
+                selectedTab.classList.add('active');
+            }
+            
+            // Mark button as active
+            event.target.classList.add('active');
+        }
+
         function toggleTestResult(headerElement) {
             const testResult = headerElement.parentElement;
             testResult.classList.toggle('expanded');
         }
 
-        // Toggle subsection visibility
         function toggleSubsection(headerElement) {
             const subsection = headerElement.parentElement;
             subsection.classList.toggle('expanded');
         }
 
-        // Initialize on DOM load
         document.addEventListener('DOMContentLoaded', function() {
-            // Auto-expand first test result
             const firstResult = document.querySelector('.test-result');
             if (firstResult) {
                 firstResult.classList.add('expanded');
             }
 
-            // Add click handlers to all subsection headers
             document.querySelectorAll('.subsection-header').forEach(header => {
                 header.addEventListener('click', toggleSubsection);
             });
 
-            // Add click handlers to all test headers
             document.querySelectorAll('.test-header').forEach(header => {
                 header.addEventListener('click', function(e) {
                     if (e.target.closest('.subsection-header')) {
@@ -973,4 +1279,4 @@ function generateHtmlReport(healingResults) {
   return reportPath;
 }
 
-export { generateHtmlReport, escapeHtmlNode, loadHealingLogs, generateLocatorSummary };
+export { generateHtmlReport, escapeHtmlNode, loadHealingLogs, extractLocatorChanges, extractErrorPatterns };
