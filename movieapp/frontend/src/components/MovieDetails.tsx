@@ -15,7 +15,18 @@ import {
   Fade,
   Chip,
   Divider,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
+  IconButton,
 } from '@mui/material';
+import HelpIcon from '@mui/icons-material/Help';
+import CloseIcon from '@mui/icons-material/Close';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { styled, keyframes } from '@mui/material/styles';
 
 const fadeInUp = keyframes`
@@ -58,12 +69,33 @@ const MovieDetails: React.FC = () => {
   const { selectedMovie, loading, error } = useSelector((state: RootState) => state.movies);
   const [selectedTime, setSelectedTime] = useState<string>('');
   const [selectedSeats, setSelectedSeats] = useState<number[]>([]);
+  // Feature 1.1: Seat Conflict Alert Dialog
+  const [seatConflictError, setSeatConflictError] = useState<string>('');
+  const [unavailableSeats, setUnavailableSeats] = useState<number[]>([]);
+  // Feature 2.1: Help/FAQ Modal
+  const [showHelpDialog, setShowHelpDialog] = useState(false);
+  // Feature 2.2: Unsaved Changes Warning
+  const [showExitWarning, setShowExitWarning] = useState(false);
+  const [pendingNavigation, setPendingNavigation] = useState<string | null>(null);
 
   useEffect(() => {
     if (id) {
       dispatch(fetchMovieById(parseInt(id)));
     }
   }, [dispatch, id]);
+
+  // Feature 2.2: Warn before leaving with unsaved seats
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (selectedSeats.length > 0) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [selectedSeats]);
 
   if (loading) {
     return (
@@ -163,22 +195,20 @@ const MovieDetails: React.FC = () => {
   const handleBooking = async () => {
     if (!selectedMovie || !selectedTime) return;
 
-    // Check if selected seats are still available (prevent double-booking)
+    // Feature 1.1: Check if selected seats are still available (prevent double-booking)
     const freshMovie = await dispatch(fetchMovieById(selectedMovie.id)).unwrap();
     const showtimeSeat = freshMovie.showtimeSeats?.find(s => s.showtime === selectedTime);
     
-    const unavailableSeats = selectedSeats.filter(
+    const conflictingSeats = selectedSeats.filter(
       seat => !showtimeSeat?.availableSeats.includes(seat)
     );
 
-    if (unavailableSeats.length > 0) {
-      // Show error if seats are no longer available
-      alert(
-        `Sorry! Seats ${unavailableSeats.join(', ')} are no longer available. ` +
-        `Please select different seats.`
-      );
-      // Refresh available seats
-      setSelectedSeats(prev => prev.filter(seat => !unavailableSeats.includes(seat)));
+    if (conflictingSeats.length > 0) {
+      // Feature 1.1: Show enhanced conflict dialog with seat chips
+      setUnavailableSeats(conflictingSeats);
+      setSeatConflictError('conflict');
+      // Remove unavailable seats from selection
+      setSelectedSeats(prev => prev.filter(seat => !conflictingSeats.includes(seat)));
       return;
     }
 
@@ -192,6 +222,16 @@ const MovieDetails: React.FC = () => {
         movieId: selectedMovie.id
       }
     });
+  };
+
+  // Feature 2.2: Handle navigation with unsaved seats warning
+  const handleNavigateWithWarning = (path: string) => {
+    if (selectedSeats.length > 0) {
+      setPendingNavigation(path);
+      setShowExitWarning(true);
+    } else {
+      navigate(path);
+    }
   };
 
   return (
@@ -593,6 +633,164 @@ const MovieDetails: React.FC = () => {
           )}
         </Box>
       </Stack>
+
+      {/* Feature 1.1: Seat Conflict Alert Dialog */}
+      <Dialog open={seatConflictError === 'conflict'} onClose={() => setSeatConflictError('')}>
+        <DialogTitle sx={{ fontSize: '1.2rem', fontWeight: 'bold', color: 'error.main' }}>
+          Seat Not Available
+        </DialogTitle>
+        <DialogContent sx={{ minWidth: 400 }}>
+          <Typography sx={{ mb: 2, color: 'text.secondary' }}>
+            The following seats are no longer available. They have been removed from your selection.
+          </Typography>
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+            {unavailableSeats.map(seat => (
+              <Chip 
+                key={seat} 
+                label={`Seat ${seat}`} 
+                color="error" 
+                variant="outlined"
+              />
+            ))}
+          </Box>
+          <Typography sx={{ mt: 2, fontSize: '0.9rem', color: 'text.secondary' }}>
+            Please select alternative seats or try again with other available seats.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setSeatConflictError('')} variant="contained" color="primary">
+            Understood
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Feature 2.1: Help/FAQ Modal Dialog */}
+      <Dialog 
+        open={showHelpDialog} 
+        onClose={() => setShowHelpDialog(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle sx={{ 
+          fontSize: '1.3rem', 
+          fontWeight: 'bold', 
+          display: 'flex', 
+          justifyContent: 'space-between',
+          alignItems: 'center'
+        }}>
+          <span>Help & FAQ</span>
+          <IconButton 
+            size="small" 
+            onClick={() => setShowHelpDialog(false)}
+          >
+            <CloseIcon />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent sx={{ maxHeight: '60vh', overflow: 'auto' }}>
+          <Accordion defaultExpanded>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+              <Typography fontWeight="bold">How do I select seats?</Typography>
+            </AccordionSummary>
+            <AccordionDetails>
+              <Typography variant="body2">
+                Click on any available (white) seat in the theater grid. Selected seats will be highlighted in blue. 
+                You can select multiple seats for group bookings.
+              </Typography>
+            </AccordionDetails>
+          </Accordion>
+
+          <Accordion>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+              <Typography fontWeight="bold">What does each seat color mean?</Typography>
+            </AccordionSummary>
+            <AccordionDetails>
+              <Box>
+                <Typography variant="body2" sx={{ mb: 1 }}>
+                  <strong>White:</strong> Available seats ready for booking
+                </Typography>
+                <Typography variant="body2" sx={{ mb: 1 }}>
+                  <strong>Blue:</strong> Seats you have selected
+                </Typography>
+                <Typography variant="body2">
+                  <strong>Gray:</strong> Already booked seats (unavailable)
+                </Typography>
+              </Box>
+            </AccordionDetails>
+          </Accordion>
+
+          <Accordion>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+              <Typography fontWeight="bold">Can I change my selection?</Typography>
+            </AccordionSummary>
+            <AccordionDetails>
+              <Typography variant="body2">
+                Yes! You can click on selected seats to deselect them, or click on new available seats. 
+                When you change the showtime, your selections will be cleared.
+              </Typography>
+            </AccordionDetails>
+          </Accordion>
+
+          <Accordion>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+              <Typography fontWeight="bold">What happens if a seat becomes unavailable?</Typography>
+            </AccordionSummary>
+            <AccordionDetails>
+              <Typography variant="body2">
+                If someone books a seat you selected before you complete payment, we'll notify you and remove it from your selection. 
+                You can choose alternative seats and continue.
+              </Typography>
+            </AccordionDetails>
+          </Accordion>
+
+          <Accordion>
+            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+              <Typography fontWeight="bold">How is the total amount calculated?</Typography>
+            </AccordionSummary>
+            <AccordionDetails>
+              <Typography variant="body2">
+                Total Amount = Movie Price × Number of Selected Seats. 
+                You can see the updated total in the booking summary box.
+              </Typography>
+            </AccordionDetails>
+          </Accordion>
+        </DialogContent>
+      </Dialog>
+
+      {/* Feature 2.2: Unsaved Changes Exit Warning Dialog */}
+      <Dialog open={showExitWarning} onClose={() => setShowExitWarning(false)}>
+        <DialogTitle sx={{ fontSize: '1.2rem', fontWeight: 'bold', color: 'warning.main' }}>
+          Unsaved Selection
+        </DialogTitle>
+        <DialogContent>
+          <Typography sx={{ mb: 2 }}>
+            You have {selectedSeats.length} seat(s) selected. If you leave now, your selection will be lost.
+          </Typography>
+          <Typography sx={{ color: 'text.secondary', fontSize: '0.9rem' }}>
+            Are you sure you want to leave without completing your booking?
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button 
+            onClick={() => setShowExitWarning(false)} 
+            variant="outlined"
+            color="primary"
+          >
+            Continue Selecting Seats
+          </Button>
+          <Button 
+            onClick={() => {
+              if (pendingNavigation) {
+                navigate(pendingNavigation);
+              }
+              setShowExitWarning(false);
+            }} 
+            variant="contained"
+            color="warning"
+          >
+            Leave Anyway
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Container>
   );
 };

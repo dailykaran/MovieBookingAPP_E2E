@@ -13,6 +13,11 @@ import {
   StepLabel,
   Divider,
   Fade,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Alert,
 } from '@mui/material';
 import { styled } from '@mui/material/styles';
 
@@ -65,6 +70,10 @@ const UserDetailsPage: React.FC = () => {
     phone: false,
     age: false
   });
+
+  // Feature 1.3: Validation warning dialog for form errors
+  const [showValidationWarning, setShowValidationWarning] = useState(false);
+  const [pendingPaymentNavigation, setPendingPaymentNavigation] = useState(false);
 
   const handleBlur = (field: keyof UserDetails) => {
     setTouched(prev => ({
@@ -151,26 +160,43 @@ const UserDetailsPage: React.FC = () => {
     return validateField(fieldName, userDetails[fieldName]);
   };
 
-  const isFormValid = () => {
-    // Mark all fields as touched when attempting to submit
-    if (Object.values(touched).some(t => !t)) {
-      setTouched({
-        firstName: true,
-        lastName: true,
-        email: true,
-        phone: true,
-        age: true
-      });
-      return false;
-    }
-    
+  // Check if form is currently valid without side effects
+  const isFormCurrentlyValid = () => {
     return Object.keys(userDetails).every(
       (field) => userDetails[field as keyof UserDetails].length > 0 && 
       !validateField(field, userDetails[field as keyof UserDetails])
     );
   };
 
+  // Check if user can submit (at least touched one field)
+  const canSubmit = () => {
+    return Object.values(touched).some(t => t);
+  };
+
+  // Validate and mark fields as touched on submit
+  const validateAndMarkTouched = () => {
+    // Mark all fields as touched
+    setTouched({
+      firstName: true,
+      lastName: true,
+      email: true,
+      phone: true,
+      age: true
+    });
+    // Return whether form is valid
+    return isFormCurrentlyValid();
+  };
+
   const handleContinue = () => {
+    // Feature 1.3: Check for validation errors before proceeding
+    const isValid = validateAndMarkTouched();
+    
+    if (!isValid) {
+      setShowValidationWarning(true);
+      setPendingPaymentNavigation(false);
+      return;
+    }
+
     navigate('/payment', {
       state: {
         ...bookingDetails,
@@ -343,7 +369,7 @@ const UserDetailsPage: React.FC = () => {
                 variant="contained"
                 color="primary"
                 onClick={handleContinue}
-                disabled={!isFormValid()}
+                disabled={!canSubmit()}
                 sx={{ 
                   px: 6,
                   py: 1.5,
@@ -356,6 +382,41 @@ const UserDetailsPage: React.FC = () => {
           </Box>
         </Fade>
       </Paper>
+
+      {/* Feature 1.3: Form Validation Warning Dialog */}
+      <Dialog open={showValidationWarning} onClose={() => setShowValidationWarning(false)}>
+        <DialogTitle sx={{ fontSize: '1.2rem', fontWeight: 'bold', color: 'error.main' }}>
+          Form Validation Error
+        </DialogTitle>
+        <DialogContent>
+          <Alert severity="error" sx={{ mb: 2 }}>
+            Please correct the following errors before proceeding to payment:
+          </Alert>
+          <Stack spacing={1}>
+            {Object.keys(userDetails).map((field) => {
+              const fieldKey = field as keyof UserDetails;
+              const error = getFieldError(fieldKey);
+              if (error) {
+                return (
+                  <Alert key={field} severity="warning">
+                    <strong>{field.charAt(0).toUpperCase() + field.slice(1)}:</strong> {error}
+                  </Alert>
+                );
+              }
+              return null;
+            })}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button 
+            onClick={() => setShowValidationWarning(false)} 
+            variant="contained"
+            color="primary"
+          >
+            Fix Errors
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Container>
   );
 };
