@@ -4,6 +4,7 @@
       "id": 1,
       "title": "Inception",
       "description": "A thief who steals corporate secrets through dream-sharing technology is given the inverse task of planting an idea into the mind of a C.E.O.",
+      "trailerUrl": "https://www.youtube.com/watch?v=YoHD_XwIlNw",
       "duration": 148,
       "price": 12.99,
       "showtimes": [
@@ -122,7 +123,6 @@
         {
           "showtime": "17:30",
           "availableSeats": [
-            1,
             2,
             3,
             4,
@@ -223,25 +223,13 @@
             99,
             100
           ],
-          "bookedSeats": []
+          "bookedSeats": [
+            1
+          ]
         },
         {
           "showtime": "21:00",
           "availableSeats": [
-            1,
-            2,
-            3,
-            4,
-            5,
-            6,
-            7,
-            8,
-            9,
-            10,
-            11,
-            12,
-            13,
-            14,
             15,
             16,
             17,
@@ -329,7 +317,22 @@
             99,
             100
           ],
-          "bookedSeats": []
+          "bookedSeats": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14
+          ]
         }
       ]
     },
@@ -337,6 +340,7 @@
       "id": 2,
       "title": "The Dark Knight",
       "description": "When the menace known as the Joker wreaks havoc and chaos on the people of Gotham, Batman must accept one of the greatest psychological and physical tests of his ability to fight injustice.",
+      "trailerUrl": "https://www.youtube.com/watch?v=EXeTwQWrcwY",
       "duration": 152,
       "price": 12.99,
       "showtimes": [
@@ -524,7 +528,6 @@
             70,
             71,
             72,
-            73,
             74,
             75,
             76,
@@ -555,7 +558,8 @@
             85,
             86,
             13,
-            44
+            44,
+            73
           ]
         },
         {
@@ -670,6 +674,7 @@
       "id": 3,
       "title": "The Avengers",
       "description": "Earth's mightiest heroes must come together and learn to fight as a team if they are going to stop Loki and his alien army from enslaving humanity.",
+      "trailerUrl": "https://www.youtube.com/watch?v=eOrNdBpzqmU",
       "duration": 143,
       "price": 13.99,
       "showtimes": [
@@ -824,7 +829,6 @@
             33,
             34,
             35,
-            36,
             37,
             38,
             39,
@@ -842,7 +846,6 @@
             51,
             52,
             53,
-            54,
             55,
             56,
             57,
@@ -890,7 +893,9 @@
             88,
             86,
             87,
-            85
+            85,
+            54,
+            36
           ]
         },
         {
@@ -1111,6 +1116,7 @@
       "id": 4,
       "title": "Pulp Fiction",
       "description": "The lives of two mob hitmen, a boxer, a gangster and his wife, and a pair of diner bandits intertwine in four tales of violence and redemption.",
+      "trailerUrl": "https://www.youtube.com/watch?v=tOSUlvsKc0s",
       "duration": 154,
       "price": 11.99,
       "showtimes": [
@@ -1446,6 +1452,7 @@
       "id": 5,
       "title": "The Matrix",
       "description": "A computer programmer discovers that reality as he knows it is a simulation created by machines, and joins a rebellion to break free.",
+      "trailerUrl": "https://www.youtube.com/watch?v=vKQi3bBA1y8",
       "duration": 136,
       "price": 11.99,
       "showtimes": [
@@ -1779,6 +1786,7 @@
       "id": 6,
       "title": "Jurassic Park",
       "description": "A pragmatic paleontologist visiting an almost complete theme park is tasked with protecting a couple of kids after a power failure causes the park's cloned dinosaurs to run loose.",
+      "trailerUrl": "https://www.youtube.com/watch?v=QnOMsF8dHZc",
       "duration": 127,
       "price": 12.99,
       "showtimes": [
@@ -1918,7 +1926,6 @@
             19,
             20,
             21,
-            22,
             23,
             24,
             25,
@@ -1998,7 +2005,9 @@
             99,
             100
           ],
-          "bookedSeats": []
+          "bookedSeats": [
+            22
+          ]
         },
         {
           "showtime": "19:45",
@@ -2218,6 +2227,7 @@
       "id": 7,
       "title": "The Shawshank Redemption",
       "description": "Two imprisoned men bond over a number of years, finding solace and eventual redemption through acts of common decency.",
+      "trailerUrl": "https://www.youtube.com/watch?v=6hB3S9bIaco",
       "duration": 142,
       "price": 11.99,
       "showtimes": [
@@ -2549,6 +2559,7 @@
     {
       "id": 8,
       "title": "Forrest Gump",
+      "trailerUrl": "https://www.youtube.com/watch?v=W4DQ1G0FLrE",
       "description": "The presidencies of Kennedy and Johnson, the Vietnam War, the Watergate scandal and other historical events unfold from the perspective of an Alabama man with an IQ of 75.",
       "duration": 142,
       "price": 11.99,

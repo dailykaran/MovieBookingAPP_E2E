@@ -1,0 +1,420 @@
+/**
+ * Integration Guide: Using Web Components & iFrames in ShowGlow
+ * 
+ * This file demonstrates how to update existing React components
+ * to use the new Web Components (Shadow DOM) and iFrames.
+ */
+
+// ============================================================================
+// 1. UPDATE MovieDetails.tsx - Use SeatGridWrapper + YouTubeTrailer
+// ============================================================================
+
+/*
+BEFORE:
+-------
+import { MovieDetails as OldMovieDetails } from './MovieDetails';
+
+AFTER:
+------
+*/
+
+import React, { useState } from 'react';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import SeatGridWrapper from './SeatGridWrapper';
+import YouTubeTrailer from './YouTubeTrailer';
+import { useDispatch, useSelector } from 'react-redux';
+import { fetchMovieById, fetchMovies, updateMovieSeats } from '../store/movieSlice';
+import { RootState } from '../store/store';
+import MovieCardWrapper from './MovieCardWrapper';
+import PaymentFormWrapper from './PaymentFormWrapper';
+import StripePayment from './StripePayment';
+
+interface MovieDetailsWithWebComponentsProps {
+  // Component receives standard React props
+}
+
+/**
+ * Updated MovieDetails Component using Shadow DOM Seat Grid
+ */
+const MovieDetailsWithWebComponents: React.FC = () => {
+  const { id } = useParams<{ id: string }>();
+  const dispatch = useDispatch();
+  const navigate = useNavigate();
+  const { movies, loading, error, selectedMovie } = useSelector(
+    (state: RootState) => state.movies
+  );
+
+  const [selectedSeats, setSelectedSeats] = useState<number[]>([]);
+  const [selectedShowtime, setSelectedShowtime] = useState<string>('');
+  const [showTrailer, setShowTrailer] = useState(false);
+
+  React.useEffect(() => {
+    if (id) {
+      dispatch(fetchMovieById(parseInt(id)) as any);
+    }
+  }, [id, dispatch]);
+
+  const handleSeatSelect = (seatId: number) => {
+    setSelectedSeats(prev => {
+      if (prev.includes(seatId)) {
+        return prev.filter(s => s !== seatId);
+      } else {
+        return [...prev, seatId];
+      }
+    });
+  };
+
+  const handleBooking = async () => {
+    if (!selectedShowtime) {
+      alert('Please select a showtime');
+      return;
+    }
+
+    if (selectedSeats.length === 0) {
+      alert('Please select at least one seat');
+      return;
+    }
+
+    // Fetch fresh movie state for double-booking detection
+    const latestMovie = await dispatch(fetchMovieById(parseInt(id!)) as any);
+    const unavailableSeats = selectedSeats.filter(
+      s => !latestMovie.payload?.showtimeSeats
+        .find((st: any) => st.showtime === selectedShowtime)
+        ?.availableSeats.includes(s)
+    );
+
+    if (unavailableSeats.length > 0) {
+      alert(`Seats ${unavailableSeats.join(',')} are no longer available`);
+      setSelectedSeats(prev => prev.filter(s => !unavailableSeats.includes(s)));
+      return;
+    }
+
+    // Proceed to user details
+    navigate('/user-details', {
+      state: { movieId: id, selectedSeats, showtime: selectedShowtime }
+    });
+  };
+
+  if (loading) return <div>Loading...</div>;
+  if (error) return <div>Error: {error}</div>;
+
+  const movie = selectedMovie;
+  if (!movie) return <div>Movie not found</div>;
+
+  // Get seat availability for selected showtime
+  const showtimeSeat = movie.showtimeSeats.find(
+    st => st.showtime === selectedShowtime
+  );
+
+  return (
+    <div style={{ padding: '20px' }}>
+      <h1>{movie.title}</h1>
+
+      {/* YouTube Trailer iframe Dialog */}
+      <button
+        onClick={() => setShowTrailer(true)}
+        style={{
+          padding: '10px 20px',
+          marginBottom: '20px',
+          backgroundColor: '#1976d2',
+          color: 'white',
+          border: 'none',
+          borderRadius: '4px',
+          cursor: 'pointer'
+        }}
+      >
+        ▶ Watch Trailer
+      </button>
+
+      <YouTubeTrailer
+        open={showTrailer}
+        trailerUrl={`https://www.youtube.com/embed/someVideoId`}
+        movieTitle={movie.title}
+        onClose={() => setShowTrailer(false)}
+      />
+
+      {/* Showtime Selection */}
+      <div style={{ marginBottom: '20px' }}>
+        <label>
+          Select Showtime:
+          <select
+            value={selectedShowtime}
+            onChange={e => setSelectedShowtime(e.target.value)}
+            style={{ marginLeft: '10px', padding: '8px' }}
+          >
+            <option value="">-- Select --</option>
+            {movie.showtimes.map(time => (
+              <option key={time} value={time}>
+                {time}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      {/* Shadow DOM Seat Grid Web Component */}
+      {selectedShowtime && showtimeSeat && (
+        <SeatGridWrapper
+          availableSeats={showtimeSeat.availableSeats}
+          bookedSeats={showtimeSeat.bookedSeats}
+          selectedSeats={selectedSeats}
+          showtime={selectedShowtime}
+          onSeatSelect={handleSeatSelect}
+        />
+      )}
+
+      {/* Book Button */}
+      <button
+        onClick={handleBooking}
+        disabled={selectedSeats.length === 0 || !selectedShowtime}
+        style={{
+          padding: '12px 24px',
+          backgroundColor: selectedSeats.length === 0 ? '#ccc' : '#4caf50',
+          color: 'white',
+          border: 'none',
+          borderRadius: '4px',
+          cursor: selectedSeats.length === 0 ? 'not-allowed' : 'pointer',
+          marginTop: '20px'
+        }}
+      >
+        Book {selectedSeats.length} Seat(s) - ₹{selectedSeats.length * 250}
+      </button>
+    </div>
+  );
+};
+
+export default MovieDetailsWithWebComponents;
+
+
+// ============================================================================
+// 2. UPDATE MovieList.tsx - Use MovieCardWrapper Components
+// ============================================================================
+
+/*
+Updated MovieList using Web Component Cards with Shadow DOM
+*/
+
+const MovieListWithWebComponents: React.FC = () => {
+  const dispatch = useDispatch();
+  const navigate = useNavigate();
+  const { movies } = useSelector((state: RootState) => state.movies);
+
+  React.useEffect(() => {
+    dispatch(fetchMovies() as any);
+  }, [dispatch]);
+
+  const handleBookClick = (movieId: number) => {
+    navigate(`/movie/${movieId}`);
+  };
+
+  const handleTrailerClick = (trailerUrl: string) => {
+    console.log('Trailer URL:', trailerUrl);
+    // You could show a modal or open in new tab
+  };
+
+  return (
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))',
+      gap: '20px',
+      padding: '20px'
+    }}>
+      {movies.map(movie => (
+        <MovieCardWrapper
+          key={movie.id}
+          id={movie.id}
+          title={movie.title}
+          releaseDate="2024-02-14"
+          rating={4.5}
+          reviews={1250}
+          poster={`https://via.placeholder.com/200x300?text=${encodeURIComponent(movie.title)}`}
+          trailerUrl="https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+          showtimes={movie.showtimes}
+          onBookClick={handleBookClick}
+          onTrailerClick={handleTrailerClick}
+        />
+      ))}
+    </div>
+  );
+};
+
+
+// ============================================================================
+// 3. UPDATE PaymentPage.tsx - Use PaymentFormWrapper + Stripe iFrame
+// ============================================================================
+
+/*
+Updated PaymentPage using custom PaymentForm Web Component + Stripe iframe
+*/
+
+const PaymentPageWithWebComponents: React.FC = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const dispatch = useDispatch();
+  const { movieId, selectedSeats, showtime } = location.state || {};
+  const [paymentMethod, setPaymentMethod] = React.useState<'form' | 'stripe'>('form');
+
+  React.useEffect(() => {
+    if (!movieId || !selectedSeats || !showtime) {
+      navigate('/');
+    }
+  }, [movieId, selectedSeats, showtime, navigate]);
+
+  const bookingAmount = selectedSeats.length * 250;
+
+  const handlePaymentFormSubmit = async (paymentData: any) => {
+    // Mock payment processing
+    console.log('Payment submitted:', paymentData);
+
+    // Call backend to book seats
+    try {
+      await dispatch(
+        updateMovieSeats({
+          movieId,
+          bookedSeats: selectedSeats,
+          showtime
+        }) as any
+      );
+
+      alert('✅ Booking successful!');
+      navigate('/');
+    } catch (error) {
+      alert('❌ Booking failed: ' + error);
+    }
+  };
+
+  const handlePaymentFormCancel = () => {
+    navigate(-1);
+  };
+
+  const handleStripeSuccess = async (paymentIntentId: string) => {
+    // Stripe payment succeeded, now book seats
+    try {
+      await dispatch(
+        updateMovieSeats({
+          movieId,
+          bookedSeats: selectedSeats,
+          showtime
+        }) as any
+      );
+
+      alert(`✅ Payment successful! ID: ${paymentIntentId}`);
+      navigate('/');
+    } catch (error) {
+      alert('❌ Booking failed after payment: ' + error);
+    }
+  };
+
+  const handleStripeError = (error: string) => {
+    alert('❌ Payment failed: ' + error);
+  };
+
+  return (
+    <div style={{ maxWidth: '600px', margin: '20px auto' }}>
+      <h1>Complete Your Booking</h1>
+
+      <div style={{ marginBottom: '20px', padding: '16px', backgroundColor: '#f5f5f5', borderRadius: '8px' }}>
+        <p><strong>Movie:</strong> Selected movie</p>
+        <p><strong>Seats:</strong> {selectedSeats.join(', ')}</p>
+        <p><strong>Showtime:</strong> {showtime}</p>
+        <p style={{ fontSize: '1.2em', color: '#1976d2' }}>
+          <strong>Amount: ₹{bookingAmount}</strong>
+        </p>
+      </div>
+
+      {/* Payment Method Selection */}
+      <div style={{ marginBottom: '20px' }}>
+        <label>
+          <input
+            type="radio"
+            value="form"
+            checked={paymentMethod === 'form'}
+            onChange={e => setPaymentMethod(e.target.value as 'form' | 'stripe')}
+          />
+          {' '}Custom Payment Form
+        </label>
+        <label style={{ marginLeft: '20px' }}>
+          <input
+            type="radio"
+            value="stripe"
+            checked={paymentMethod === 'stripe'}
+            onChange={e => setPaymentMethod(e.target.value as 'form' | 'stripe')}
+          />
+          {' '}Stripe (Recommended)
+        </label>
+      </div>
+
+      {/* Render Selected Payment Method */}
+      {paymentMethod === 'form' && (
+        <PaymentFormWrapper
+          amount={bookingAmount}
+          currency="INR"
+          onPaymentSubmit={handlePaymentFormSubmit}
+          onPaymentCancel={handlePaymentFormCancel}
+        />
+      )}
+
+      {paymentMethod === 'stripe' && (
+        <StripePayment
+          amount={bookingAmount}
+          currency="inr"
+          publishableKey="pk_test_..." // Replace with actual Stripe key
+          clientSecret="pi_..." // Obtain from backend
+          onSuccess={handleStripeSuccess}
+          onError={handleStripeError}
+        />
+      )}
+    </div>
+  );
+};
+
+// ============================================================================
+// 4. KEY BENEFITS
+// ============================================================================
+
+/*
+✅ SHADOW DOM BENEFITS:
+- Style encapsulation: Component CSS doesn't leak to parent
+- Reusability: Use same component in multiple pages without conflicts
+- Maintainability: Easy to update component without breaking parent
+- Performance: Optimized rendering within Shadow DOM boundary
+
+✅ iframe BENEFITS:
+- Security: YouTube videos loaded in sandboxed iframe
+- Stripe payment form isolated from app JS
+- Protection against XSS attacks
+- Clear separation of concerns
+
+✅ WEB COMPONENTS BENEFITS:
+- Framework-agnostic: Can reuse in Vue, Angular, vanilla JS
+- Native browser API: No external dependencies
+- Custom events: Communicate with parent components
+- Lifecycle hooks: connectedCallback, attributeChangedCallback
+*/
+
+// ============================================================================
+// 5. MIGRATION CHECKLIST
+// ============================================================================
+
+/*
+□ Import SeatGridWrapper in MovieDetails
+□ Import YouTubeTrailer in MovieDetails
+□ Replace <div className="seat-grid"> with <SeatGridWrapper>
+□ Add YouTube trailer button with <YouTubeTrailer> dialog
+□ Import MovieCardWrapper in MovieList
+□ Replace Movie cards with <MovieCardWrapper>
+□ Import PaymentFormWrapper in PaymentPage
+□ Replace custom form with <PaymentFormWrapper>
+□ Add Stripe option using <StripePayment>
+□ Test Web Component event listeners
+□ Test iFrame sandbox restrictions
+□ Verify Shadow DOM style encapsulation
+□ Test accessibility (keyboard navigation, labels)
+□ Update E2E tests for new selectors
+*/
+
+export {
+  MovieDetailsWithWebComponents,
+  MovieListWithWebComponents,
+  PaymentPageWithWebComponents
+};

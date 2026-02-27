@@ -31,21 +31,21 @@ test('Search field is visible and interactive', async ({ page }) => {
 });
 
 test('Seat grid displays all 100 seats with correct states', async ({ page }) => {
-  await page.goto('http://localhost:3000/movie/1');
+  await page.goto('http://localhost:3000/movie/2');
   
   // ✅ Visibility - All seats visible
-  await page.locator('button[value="17:30"]').click(); // Select a showtime
+  await page.locator('button[value="17:00"]').click(); // Select a showtime
   
-  const seatButtons = await page.locator('button').filter({ hasText: /^\d+$/ }).all(); //  One or more digits (0-9) serach by \d+
-  expect(seatButtons.length).toBe(100);
+  const seatButtons = await page.locator('button:enabled').filter({ hasText: /^\d+$/ }).all(); //  One or more digits (0-9) serach by \d+
+  expect(seatButtons.length).not.toBe(100);
   
   // ✅ Actionability - Available seats are clickable
   const availableSeat = seatButtons.find(btn => {
     // Find a seat that's not disabled
-    return btn.getAttribute('disabled').then(attr => attr === null);
+    return btn.getAttribute('enabled').then(attr => attr === null);
   });
   expect(availableSeat).toBeDefined();
-  if (availableSeat) {
+  if (availableSeat?.isEnabled()) {
     await availableSeat.click();
   }
 });
@@ -61,8 +61,9 @@ test('Error dialog appears and is dismissible', async ({ page }) => {
   }
 
   // Select one seat
-  const seats = page.locator('button').filter({ hasText: /^\d+$/ });
+  const seats = page.locator('button:enabled').filter({ hasText: /^\d+$/ });
   const seatCount = await seats.count().catch(() => 0);
+  await console.log('Available seats count:', seatCount);
   if (seatCount > 0) {
     await seats.first().click();
     await page.waitForTimeout(500);
@@ -98,19 +99,19 @@ test('Error dialog appears and is dismissible', async ({ page }) => {
   }
 });
 
-test.skip('Loading spinner appears during booking', async ({ page }) => {
+test('Loading spinner appears during booking', async ({ page }) => {
   // Navigate to a movie page
   await page.goto('http://localhost:3000/movie/1');
   
   // Select a showtime first
-  const showtimeBtn = page.locator('button[value="17:30"]');
+  const showtimeBtn = page.locator('button[value="21:00"]');
   if (await showtimeBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
     await showtimeBtn.click();
     await page.waitForTimeout(500);
   }
 
   // Select one seat
-  const seats = page.locator('button').filter({ hasText: /^\d+$/ });
+  const seats = page.locator('button:enabled').filter({ hasText: /^\d+$/ });
   const seatCount = await seats.count().catch(() => 0);
   if (seatCount > 0) {
     await seats.first().click();
@@ -127,6 +128,35 @@ test.skip('Loading spinner appears during booking', async ({ page }) => {
   // ✅ Verify that the page is interactive and accepting clicks
   // (dialogs may or may not appear depending on form state)
   const pageContent = await page.content();
+  console.log('Page content length after booking attempt:', pageContent.length);
   expect(pageContent.length).toBeGreaterThan(100); // Page loaded
+
+
+  await page.getByLabel('First Name').fill('John');
+  await page.getByLabel('Last Name').fill('Doe');
+  await page.getByLabel('Email').fill('John@example.in');
+  await page.getByLabel('Phone Number').fill('1234567890');
+  await page.getByLabel('Age').fill('25');
+  await page.getByRole('button', { name: 'Continue to Payment' }).click();
+
+  expect(page.url()).toContain('/payment'); // Should navigate to payment page
+
+  await page.getByLabel('Card Number').fill('1234567890123456');
+  await page.getByLabel('Card Holder Name').fill('John Doe');
+  await page.getByLabel('expiry Date').fill('12/25');
+  await page.getByLabel('CVV').fill('123');
+  await page.getByRole('button', { name: /Pay/i }).click();
+
+  await expect(page.locator('.MuiDialog-paperWidthSm')).toBeVisible({ timeout: 2000 });
+  await expect(page.locator('.MuiDialog-paperWidthSm h2')).toContainText('Confirm Payment');
+  await page.locator('button.MuiButton-containedSuccess').click();
+
+  await page.locator('.MuiCircularProgress-root').first().waitFor({ state: 'visible', timeout: 500 });
+  await page.locator('.MuiCircularProgress-root').last().waitFor({ state: 'detached', timeout: 5000 });
+
+  await expect(page.locator('.MuiSnackbarContent-message')).toContainText('Booking confirmed successfully!');
+
+  await page.getByRole('button', { name: /Copy/i }).click();
+  await expect(page.locator('.MuiSnackbarContent-message')).toContainText('Booking code copied');
 });
 

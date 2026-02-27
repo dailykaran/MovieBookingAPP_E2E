@@ -267,7 +267,7 @@ const UserDetailsPage: React.FC = () => {
                   <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
                     <Typography variant="h6">Total Amount:</Typography>
                     <Typography variant="h6" fontWeight="bold">
-                      ${bookingDetails.totalAmount.toFixed(2)}
+                      ₹{bookingDetails.totalAmount.toFixed(2)}
                     </Typography>
                   </Box>
                 </Stack>
