@@ -1,32 +1,31 @@
 import { Router } from 'express';
 import {
-  createPaymentIntent,
-  getPaymentIntentStatus,
-  handleStripeWebhook
+  processPayment,
+  getPaymentStatus,
+  healthCheck
 } from '../controllers/paymentController';
 
 const router = Router();
 
 /**
- * POST /api/payments/create-intent
- * Create a Stripe Payment Intent for checkout
- * Body: { amount: number, currency?: string, description?: string, metadata?: object }
- * Returns: { clientSecret, paymentIntentId, status }
+ * POST /api/payments/process
+ * Process a payment locally (no external service required)
+ * Body: { amount, currency, cardNumber, cardHolder, expiryDate, cvv, movieId, seats, showtime }
+ * Returns: { success, paymentId, amount, currency, status, message }
  */
-router.post('/create-intent', createPaymentIntent);
+router.post('/process', processPayment);
 
 /**
- * GET /api/payments/intent/:paymentIntentId
- * Get the status of a Payment Intent
- * Returns: { id, status, amount, currency }
+ * GET /api/payments/status/:paymentId
+ * Get the status of a payment
+ * Returns: { success, paymentId, status, message }
  */
-router.get('/intent/:paymentIntentId', getPaymentIntentStatus);
+router.get('/status/:paymentId', getPaymentStatus);
 
 /**
- * POST /api/payments/webhook
- * Stripe webhook for payment events
- * Required: stripe-signature header
+ * GET /api/payments/health
+ * Health check for payment service
  */
-router.post('/webhook', handleStripeWebhook);
+router.get('/health', healthCheck);
 
 export default router;

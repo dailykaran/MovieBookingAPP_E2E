@@ -4,22 +4,21 @@ const express_1 = require("express");
 const paymentController_1 = require("../controllers/paymentController");
 const router = (0, express_1.Router)();
 /**
- * POST /api/payments/create-intent
- * Create a Stripe Payment Intent for checkout
- * Body: { amount: number, currency?: string, description?: string, metadata?: object }
- * Returns: { clientSecret, paymentIntentId, status }
+ * POST /api/payments/process
+ * Process a payment locally (no external service required)
+ * Body: { amount, currency, cardNumber, cardHolder, expiryDate, cvv, movieId, seats, showtime }
+ * Returns: { success, paymentId, amount, currency, status, message }
  */
-router.post('/create-intent', paymentController_1.createPaymentIntent);
+router.post('/process', paymentController_1.processPayment);
 /**
- * GET /api/payments/intent/:paymentIntentId
- * Get the status of a Payment Intent
- * Returns: { id, status, amount, currency }
+ * GET /api/payments/status/:paymentId
+ * Get the status of a payment
+ * Returns: { success, paymentId, status, message }
  */
-router.get('/intent/:paymentIntentId', paymentController_1.getPaymentIntentStatus);
+router.get('/status/:paymentId', paymentController_1.getPaymentStatus);
 /**
- * POST /api/payments/webhook
- * Stripe webhook for payment events
- * Required: stripe-signature header
+ * GET /api/payments/health
+ * Health check for payment service
  */
-router.post('/webhook', paymentController_1.handleStripeWebhook);
+router.get('/health', paymentController_1.healthCheck);
 exports.default = router;

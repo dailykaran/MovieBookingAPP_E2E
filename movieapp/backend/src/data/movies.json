@@ -123,7 +123,6 @@
         {
           "showtime": "17:30",
           "availableSeats": [
-            2,
             3,
             4,
             5,
@@ -224,7 +223,8 @@
             100
           ],
           "bookedSeats": [
-            1
+            1,
+            2
           ]
         },
         {
@@ -661,12 +661,13 @@
             94,
             95,
             96,
-            97,
             98,
             99,
             100
           ],
-          "bookedSeats": []
+          "bookedSeats": [
+            97
+          ]
         }
       ]
     },
@@ -701,7 +702,6 @@
             12,
             13,
             14,
-            15,
             16,
             17,
             18,
@@ -788,7 +788,8 @@
             100
           ],
           "bookedSeats": [
-            36
+            36,
+            15
           ]
         },
         {
@@ -848,7 +849,6 @@
             53,
             55,
             56,
-            57,
             58,
             59,
             60,
@@ -895,7 +895,8 @@
             87,
             85,
             54,
-            36
+            36,
+            57
           ]
         },
         {
@@ -1239,7 +1240,6 @@
             2,
             3,
             4,
-            5,
             6,
             7,
             8,
@@ -1336,7 +1336,8 @@
             100
           ],
           "bookedSeats": [
-            74
+            74,
+            5
           ]
         },
         {
@@ -2559,7 +2560,7 @@
     {
       "id": 8,
       "title": "Forrest Gump",
-      "trailerUrl": "https://www.youtube.com/watch?v=W4DQ1G0FLrE",
+      "trailerUrl": "https://www.youtube.com/watch?v=BROKEN_LINK_INVALID",
       "description": "The presidencies of Kennedy and Johnson, the Vietnam War, the Watergate scandal and other historical events unfold from the perspective of an Alabama man with an IQ of 75.",
       "duration": 142,
       "price": 11.99,

@@ -26,7 +26,6 @@ import {
   AccordionDetails,
   IconButton,
 } from '@mui/material';
-import HelpIcon from '@mui/icons-material/Help';
 import CloseIcon from '@mui/icons-material/Close';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { styled, keyframes } from '@mui/material/styles';
@@ -74,13 +73,12 @@ const MovieDetails: React.FC = () => {
   // Feature 1.1: Seat Conflict Alert Dialog
   const [seatConflictError, setSeatConflictError] = useState<string>('');
   const [unavailableSeats, setUnavailableSeats] = useState<number[]>([]);
+  // Feature 1.2: Validation Alerts for missing selections
+  const [validationAlert, setValidationAlert] = useState<string>(''); // 'noSeats' | 'noShowtime' | ''
   // Feature 2.1: Help/FAQ Modal
   const [showHelpDialog, setShowHelpDialog] = useState(false);
   // Trailer Dialog
   const [trailerDialogOpen, setTrailerDialogOpen] = useState(false);
-  // Feature 2.2: Unsaved Changes Warning
-  const [showExitWarning, setShowExitWarning] = useState(false);
-  const [pendingNavigation, setPendingNavigation] = useState<string | null>(null);
 
   useEffect(() => {
     if (id) {
@@ -197,7 +195,19 @@ const MovieDetails: React.FC = () => {
   };
 
   const handleBooking = async () => {
-    if (!selectedMovie || !selectedTime) return;
+    if (!selectedMovie) return;
+
+    // Feature 1.2: Validate showtime selection
+    if (!selectedTime) {
+      window.alert('Please select a showtime');
+      return;
+    }
+
+    // Feature 1.2: Validate seat selection
+    if (selectedSeats.length === 0) {
+      window.alert('Please select at least one seat');
+      return;
+    }
 
     // Feature 1.1: Check if selected seats are still available (prevent double-booking)
     const freshMovie = await dispatch(fetchMovieById(selectedMovie.id)).unwrap();
@@ -208,9 +218,10 @@ const MovieDetails: React.FC = () => {
     );
 
     if (conflictingSeats.length > 0) {
-      // Feature 1.1: Show enhanced conflict dialog with seat chips
-      setUnavailableSeats(conflictingSeats);
-      setSeatConflictError('conflict');
+      // Feature 1.1: Show browser alert for double-booking conflict
+      const conflictMessage = `Seats ${conflictingSeats.join(', ')} were just booked by another user. Please select different seats.`;
+      window.alert(conflictMessage);
+      
       // Remove unavailable seats from selection
       setSelectedSeats(prev => prev.filter(seat => !conflictingSeats.includes(seat)));
       return;
@@ -226,16 +237,6 @@ const MovieDetails: React.FC = () => {
         movieId: selectedMovie.id
       }
     });
-  };
-
-  // Feature 2.2: Handle navigation with unsaved seats warning
-  const handleNavigateWithWarning = (path: string) => {
-    if (selectedSeats.length > 0) {
-      setPendingNavigation(path);
-      setShowExitWarning(true);
-    } else {
-      navigate(path);
-    }
   };
 
   return (
@@ -524,83 +525,94 @@ const MovieDetails: React.FC = () => {
                   Available: {selectedMovie.showtimeSeats?.find(s => s.showtime === selectedTime)?.availableSeats.length || 0} | Booked: {selectedMovie.showtimeSeats?.find(s => s.showtime === selectedTime)?.bookedSeats.length || 0} | Total: 100
                 </Box>
               </Paper>
+
+              {selectedSeats.length > 0 && (
+                <Paper
+                  elevation={3}
+                  sx={{
+                    mt: 4,
+                    p: 3,
+                    borderRadius: 2,
+                    backgroundColor: 'success.light'
+                  }}
+                >
+                  <Stack spacing={2}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Typography variant="subtitle1">Selected Seats:</Typography>
+                      <Typography variant="subtitle1" fontWeight="bold">
+                        {selectedSeats.join(', ')}
+                      </Typography>
+                    </Box>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Typography variant="subtitle1">Price per Ticket:</Typography>
+                      <Typography variant="subtitle1" fontWeight="bold">
+                        ${selectedMovie.price.toFixed(2)}
+                      </Typography>
+                    </Box>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Typography variant="h6">Total Amount:</Typography>
+                      <Typography variant="h6" fontWeight="bold" color="primary.main">
+                        ₹{(selectedMovie.price * selectedSeats.length).toFixed(2)}
+                      </Typography>
+                    </Box>
+                  </Stack>
+                </Paper>
+              )}
             </Box>
           )}
 
-          {selectedTime && selectedSeats.length > 0 && (
-            <Paper
-              elevation={3}
-              sx={{
-                mt: 4,
-                p: 3,
-                borderRadius: 2,
-                backgroundColor: 'success.light'
-              }}
-            >
-              <Stack spacing={2}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Typography variant="subtitle1">Selected Seats:</Typography>
-                  <Typography variant="subtitle1" fontWeight="bold">
-                    {selectedSeats.join(', ')}
-                  </Typography>
-                </Box>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Typography variant="subtitle1">Price per Ticket:</Typography>
-                  <Typography variant="subtitle1" fontWeight="bold">
-                    ${selectedMovie.price.toFixed(2)}
-                  </Typography>
-                </Box>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Typography variant="h6">Total Amount:</Typography>
-                  <Typography variant="h6" fontWeight="bold" color="primary.main">
-                    ₹{(selectedMovie.price * selectedSeats.length).toFixed(2)}
-                  </Typography>
-                </Box>
-                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} sx={{ mt: 2 }}>
-                  <Button
-                    variant="outlined"
-                    color="primary"
-                    fullWidth
-                    sx={{ 
-                      py: 2,
-                      borderRadius: 2,
-                      fontSize: '1rem',
-                      fontWeight: 'bold',
-                      transition: 'all 0.3s ease',
-                      '&:hover': {
-                        transform: 'translateY(-2px)',
-                        boxShadow: 2
-                      }
-                    }}
-                    onClick={() => setTrailerDialogOpen(true)}
-                  >
-                    🎬 Watch Trailer
-                  </Button>
-                  <Button
-                    variant="contained"
-                    color="primary"
-                    fullWidth
-                    sx={{ 
-                      py: 2,
-                      borderRadius: 2,
-                      fontSize: '1.2rem',
-                      fontWeight: 'bold',
-                      backgroundColor: 'success.main',
-                      transition: 'all 0.3s ease',
-                      '&:hover': {
-                        transform: 'translateY(-2px)',
-                        boxShadow: 4,
-                        backgroundColor: 'success.dark'
-                      }
-                    }}
-                    onClick={handleBooking}
-                  >
-                    Confirm Booking
-                  </Button>
-                </Stack>
-              </Stack>
-            </Paper>
-          )}
+          <Paper
+            elevation={3}
+            sx={{
+              mt: selectedTime ? 4 : 3,
+              p: 3,
+              borderRadius: 2,
+              backgroundColor: 'background.paper'
+            }}
+          >
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+              <Button
+                variant="outlined"
+                color="primary"
+                fullWidth
+                sx={{ 
+                  py: 2,
+                  borderRadius: 2,
+                  fontSize: '1rem',
+                  fontWeight: 'bold',
+                  transition: 'all 0.3s ease',
+                  '&:hover': {
+                    transform: 'translateY(-2px)',
+                    boxShadow: 2
+                  }
+                }}
+                onClick={() => setTrailerDialogOpen(true)}
+              >
+                🎬 Watch Trailer
+              </Button>
+              <Button
+                variant="contained"
+                color="primary"
+                fullWidth
+                sx={{ 
+                  py: 2,
+                  borderRadius: 2,
+                  fontSize: '1.2rem',
+                  fontWeight: 'bold',
+                  backgroundColor: 'success.main',
+                  transition: 'all 0.3s ease',
+                  '&:hover': {
+                    transform: 'translateY(-2px)',
+                    boxShadow: 4,
+                    backgroundColor: 'success.dark'
+                  }
+                }}
+                onClick={handleBooking}
+              >
+                Confirm Booking
+              </Button>
+            </Stack>
+          </Paper>
         </Box>
       </Stack>
 
@@ -638,6 +650,40 @@ const MovieDetails: React.FC = () => {
         <DialogActions>
           <Button onClick={() => setSeatConflictError('')} variant="contained" color="primary">
             Understood
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Feature 1.2: No Seats Selected Warning Dialog */}
+      <Dialog open={validationAlert === 'noSeats'} onClose={() => setValidationAlert('')}>
+        <DialogTitle sx={{ fontSize: '1.2rem', fontWeight: 'bold', color: 'warning.main' }}>
+          No Seats Selected
+        </DialogTitle>
+        <DialogContent sx={{ minWidth: 400 }}>
+          <Typography sx={{ color: 'text.secondary' }}>
+            Please select at least one seat before confirming your booking.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setValidationAlert('')} variant="contained" color="primary">
+            Select Seats
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Feature 1.2: No Showtime Selected Warning Dialog */}
+      <Dialog open={validationAlert === 'noShowtime'} onClose={() => setValidationAlert('')}>
+        <DialogTitle sx={{ fontSize: '1.2rem', fontWeight: 'bold', color: 'warning.main' }}>
+          Showtime Not Selected
+        </DialogTitle>
+        <DialogContent sx={{ minWidth: 400 }}>
+          <Typography sx={{ color: 'text.secondary' }}>
+            Please select a showtime before confirming your booking.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setValidationAlert('')} variant="contained" color="primary">
+            Select Showtime
           </Button>
         </DialogActions>
       </Dialog>
@@ -732,42 +778,6 @@ const MovieDetails: React.FC = () => {
             </AccordionDetails>
           </Accordion>
         </DialogContent>
-      </Dialog>
-
-      {/* Feature 2.2: Unsaved Changes Exit Warning Dialog */}
-      <Dialog open={showExitWarning} onClose={() => setShowExitWarning(false)}>
-        <DialogTitle sx={{ fontSize: '1.2rem', fontWeight: 'bold', color: 'warning.main' }}>
-          Unsaved Selection
-        </DialogTitle>
-        <DialogContent>
-          <Typography sx={{ mb: 2 }}>
-            You have {selectedSeats.length} seat(s) selected. If you leave now, your selection will be lost.
-          </Typography>
-          <Typography sx={{ color: 'text.secondary', fontSize: '0.9rem' }}>
-            Are you sure you want to leave without completing your booking?
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button 
-            onClick={() => setShowExitWarning(false)} 
-            variant="outlined"
-            color="primary"
-          >
-            Continue Selecting Seats
-          </Button>
-          <Button 
-            onClick={() => {
-              if (pendingNavigation) {
-                navigate(pendingNavigation);
-              }
-              setShowExitWarning(false);
-            }} 
-            variant="contained"
-            color="warning"
-          >
-            Leave Anyway
-          </Button>
-        </DialogActions>
       </Dialog>
     </Container>
   );

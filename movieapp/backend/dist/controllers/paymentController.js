@@ -8,114 +8,115 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.handleStripeWebhook = exports.getPaymentIntentStatus = exports.createPaymentIntent = void 0;
-const stripe_1 = __importDefault(require("stripe"));
-// Initialize Stripe
-const stripe = new stripe_1.default(process.env.STRIPE_SECRET_KEY || 'sk_test_dummy', {
-    apiVersion: '2023-10-16'
-});
+exports.healthCheck = exports.getPaymentStatus = exports.processPayment = void 0;
 /**
- * Create a Stripe Payment Intent
- * Used by frontend to get a client secret for card payment processing
+ * Process a simple local payment
+ * No external service required - works 100% locally
  */
-const createPaymentIntent = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+const processPayment = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const { amount, currency = 'inr', description, metadata } = req.body;
+        const { amount, currency = 'inr', cardNumber, cardHolder, expiryDate, cvv, movieId, seats, showtime } = req.body;
         // Validate amount
         if (!amount || amount <= 0) {
             return res.status(400).json({
-                error: 'Invalid amount. Must be greater than 0.'
+                success: false,
+                message: 'Invalid amount. Must be greater than 0.'
             });
         }
-        // Create payment intent with Stripe
-        const paymentIntent = yield stripe.paymentIntents.create({
-            amount: Math.round(amount * 100), // Convert to cents
-            currency,
-            description: description || 'Movie Ticket Booking',
-            metadata: metadata || {}
-        });
-        // Return client secret to frontend
-        return res.status(200).json({
-            clientSecret: paymentIntent.client_secret,
-            paymentIntentId: paymentIntent.id,
-            status: paymentIntent.status
-        });
-    }
-    catch (error) {
-        console.error('Stripe Payment Intent Error:', error);
-        return res.status(500).json({
-            error: error.message || 'Failed to create payment intent'
-        });
-    }
-});
-exports.createPaymentIntent = createPaymentIntent;
-/**
- * Retrieve a Stripe Payment Intent status
- */
-const getPaymentIntentStatus = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    try {
-        const { paymentIntentId } = req.params;
-        if (!paymentIntentId) {
+        // Validate card details
+        if (!cardNumber || !cardHolder || !expiryDate || !cvv) {
             return res.status(400).json({
-                error: 'Payment Intent ID is required'
+                success: false,
+                message: 'All card details are required'
             });
         }
-        const paymentIntent = yield stripe.paymentIntents.retrieve(paymentIntentId);
-        return res.status(200).json({
-            id: paymentIntent.id,
-            status: paymentIntent.status,
-            amount: paymentIntent.amount,
-            currency: paymentIntent.currency
-        });
+        // Simple validation
+        const cardDigits = cardNumber.replace(/\s/g, '');
+        if (cardDigits.length < 13 || cardDigits.length > 19) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid card number'
+            });
+        }
+        if (cvv.length < 3 || cvv.length > 4) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid CVV'
+            });
+        }
+        // Generate unique payment ID
+        const paymentId = `PAY-${Date.now()}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
+        // Simulate payment processing (in real app, this would charge the card)
+        // For testing: Accept any card number that passes basic validation
+        const isSuccessful = !cardNumber.startsWith('0'); // Simple rule: reject cards starting with 0
+        if (isSuccessful) {
+            return res.status(200).json({
+                success: true,
+                paymentId,
+                amount,
+                currency,
+                status: 'completed',
+                message: 'Payment processed successfully!'
+            });
+        }
+        else {
+            return res.status(400).json({
+                success: false,
+                paymentId,
+                amount,
+                currency,
+                status: 'failed',
+                message: 'Payment declined. Please use a valid test card.'
+            });
+        }
     }
     catch (error) {
-        console.error('Stripe Retrieve Error:', error);
+        console.error('Payment Processing Error:', error);
         return res.status(500).json({
-            error: error.message || 'Failed to retrieve payment intent'
+            success: false,
+            message: error.message || 'Payment processing failed'
         });
     }
 });
-exports.getPaymentIntentStatus = getPaymentIntentStatus;
+exports.processPayment = processPayment;
 /**
- * Handle Stripe webhook for payment confirmations
- * This would be called by Stripe to confirm payment completion
+ * Get payment status
  */
-const handleStripeWebhook = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+const getPaymentStatus = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     try {
-        const sig = req.headers['stripe-signature'];
-        const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
-        if (!webhookSecret || !sig) {
-            return res.status(400).json({ error: 'Missing webhook signature or secret' });
+        const { paymentId } = req.params;
+        if (!paymentId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Payment ID is required'
+            });
         }
-        const event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
-        // Handle different event types
-        switch (event.type) {
-            case 'payment_intent.succeeded':
-                console.log('✅ Payment succeeded:', event.data.object);
-                // TODO: Update booking as confirmed in database
-                break;
-            case 'payment_intent.payment_failed':
-                console.log('❌ Payment failed:', event.data.object);
-                // TODO: Update booking as failed in database
-                break;
-            case 'charge.refunded':
-                console.log('💰 Charge refunded:', event.data.object);
-                // TODO: Handle refund in database
-                break;
-            default:
-                console.log(`Unhandled event type: ${event.type}`);
-        }
-        return res.status(200).json({ received: true });
+        // For local testing, we'll just return success status
+        return res.status(200).json({
+            success: true,
+            paymentId,
+            status: 'completed',
+            message: 'Payment retrieved successfully'
+        });
     }
     catch (error) {
-        console.error('Webhook Error:', error);
+        console.error('Get Payment Status Error:', error);
         return res.status(500).json({
-            error: error.message || 'Webhook processing failed'
+            success: false,
+            message: error.message || 'Failed to retrieve payment status'
         });
     }
 });
-exports.handleStripeWebhook = handleStripeWebhook;
+exports.getPaymentStatus = getPaymentStatus;
+/**
+ * Simple health check for payment service
+ */
+const healthCheck = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    return res.status(200).json({
+        success: true,
+        message: 'Payment service is running on localhost',
+        timestamp: new Date().toISOString()
+    });
+});
+exports.healthCheck = healthCheck;

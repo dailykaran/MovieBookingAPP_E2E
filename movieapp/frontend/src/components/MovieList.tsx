@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { Movie } from '../types/movie';
 import { fetchMovies } from '../store/movieSlice';
 import { RootState, AppDispatch } from '../store/store';
@@ -34,12 +34,23 @@ const FlexGrid = styled(Box)(({ theme }) => ({
 
 const MovieList: React.FC = () => {
   const dispatch = useDispatch<AppDispatch>();
+  const navigate = useNavigate();
   const { movies, loading, error } = useSelector((state: RootState) => state.movies);
   const [searchTerm, setSearchTerm] = React.useState('');
 
   useEffect(() => {
     dispatch(fetchMovies());
   }, [dispatch]);
+
+  const handleBookNow = (movie: Movie) => {
+    if (movie.title === 'Forrest Gump') {
+      // Navigate to a broken URL for Forrest Gump
+      window.location.href = 'http://localhost:3000/broken-booking-link';
+    } else {
+      // Navigate normally to movie details
+      navigate(`/movie/${movie.id}`);
+    }
+  };
 
   const filteredMovies = movies.filter((movie: Movie) =>
     movie.title.toLowerCase().includes(searchTerm.toLowerCase())
@@ -106,8 +117,7 @@ const MovieList: React.FC = () => {
               <CardActions>
                 <Button 
                   size="small" 
-                  component={Link} 
-                  to={`/movie/${movie.id}`}
+                  onClick={() => handleBookNow(movie)}
                   variant="contained"
                   color="primary"
                   fullWidth

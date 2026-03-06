@@ -3,7 +3,7 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { Provider } from 'react-redux';
 import { ThemeProvider, CssBaseline, AppBar, Toolbar, Typography, Container } from '@mui/material';
 import { createTheme } from '@mui/material/styles';
-import MovieList from './components/MovieList';
+import MovieListWithIframe from './components/MovieListWithIframe';
 import MovieDetails from './components/MovieDetails';
 import UserDetailsPage from './components/UserDetailsPage';
 import PaymentPage from './components/PaymentPage';
@@ -36,7 +36,7 @@ function App() {
           </AppBar>
           <Container>
             <Routes>
-              <Route path="/" element={<MovieList />} />
+              <Route path="/" element={<MovieListWithIframe />} />
               <Route path="/movie/:id" element={<MovieDetails />} />
               <Route path="/user-details" element={<UserDetailsPage />} />
               <Route path="/payment" element={<PaymentPage />} />

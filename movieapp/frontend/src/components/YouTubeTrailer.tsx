@@ -3,7 +3,7 @@
  * Embeds YouTube videos securely with sandbox restrictions
  */
 
-import React, { useState } from 'react';
+import React from 'react';
 import { Dialog, DialogTitle, DialogContent, IconButton, Box } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 

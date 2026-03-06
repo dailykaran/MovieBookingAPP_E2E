@@ -3,7 +3,6 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useDispatch } from 'react-redux';
 import { AppDispatch } from '../store/store';
 import { updateMovieSeats } from '../store/movieSlice';
-import StripePayment from './StripePayment';
 import {
   Container,
   Paper,
@@ -71,7 +70,6 @@ const PaymentPage: React.FC = () => {
 
   const [activeStep, setActiveStep] = useState(1);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [useStripePayment, setUseStripePayment] = useState(true);
   const [paymentInfo, setPaymentInfo] = useState<PaymentInfo>({
     cardNumber: '',
     cardHolder: '',
@@ -88,7 +86,6 @@ const PaymentPage: React.FC = () => {
 
   // Feature 1.5: Network error retry dialog state
   const [showNetworkError, setShowNetworkError] = useState(false);
-  const [retryCount, setRetryCount] = useState(0);
 
   // Feature 2.4: Copy to clipboard feedback state
   const [copyFeedback, setCopyFeedback] = useState(false);
@@ -100,43 +97,7 @@ const PaymentPage: React.FC = () => {
   // Feature 1.3: Payment confirmation dialog state
   const [showConfirmationDialog, setShowConfirmationDialog] = useState(false);
   const [paymentError, setPaymentError] = useState<string>('');
-  // Stripe payment state
-  const [stripeError, setStripeError] = useState<string>('');
   const [showPaymentErrorDialog, setShowPaymentErrorDialog] = useState(false);
-
-  // Feature: Create Stripe Payment Intent on backend
-  const createPaymentIntent = async (): Promise<string> => {
-    try {
-      const response = await fetch('http://localhost:5000/api/payments/create-intent', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          amount: bookingDetails.totalAmount,
-          currency: 'inr',
-          description: `Movie Ticket - ${bookingDetails.movieTitle} at ${bookingDetails.showtime}`,
-          metadata: {
-            movieId: bookingDetails.movieId,
-            seats: bookingDetails.selectedSeats.join(','),
-            showtime: bookingDetails.showtime,
-            userEmail: bookingDetails.userDetails.email
-          }
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to create payment intent');
-      }
-
-      const data = await response.json();
-      return data.clientSecret;
-    } catch (error: any) {
-      const errorMsg = error.message || 'Failed to create payment intent';
-      setStripeError(errorMsg);
-      throw new Error(errorMsg);
-    }
-  };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -216,9 +177,41 @@ const PaymentPage: React.FC = () => {
       setLoadingStep(1);
       await new Promise(resolve => setTimeout(resolve, 800));
 
-      // Feature 1.4: Update progress - Step 2: Processing
+      // Feature 1.4: Update progress - Step 2: Processing Payment
       setLoadingStep(2);
       
+      // Call local payment processing endpoint
+      const cardDigits = paymentInfo.cardNumber.replace(/\s/g, '');
+      const paymentResponse = await fetch('http://localhost:5000/api/payments/process', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          amount: bookingDetails.totalAmount,
+          currency: 'inr',
+          cardNumber: cardDigits,
+          cardHolder: paymentInfo.cardHolder,
+          expiryDate: paymentInfo.expiryDate,
+          cvv: paymentInfo.cvv,
+          movieId: bookingDetails.movieId,
+          seats: bookingDetails.selectedSeats.join(','),
+          showtime: bookingDetails.showtime,
+          userEmail: bookingDetails.userDetails.email
+        })
+      });
+
+      if (!paymentResponse.ok) {
+        const errorData = await paymentResponse.json();
+        throw new Error(errorData.message || 'Payment processing failed');
+      }
+
+      const paymentData = await paymentResponse.json();
+
+      if (!paymentData.success) {
+        throw new Error(paymentData.message || 'Payment was declined');
+      }
+
       // Sync booked seats to backend with showtime
       if (bookingDetails.movieId && bookingDetails.showtime) {
         try {
@@ -235,9 +228,6 @@ const PaymentPage: React.FC = () => {
           return;
         }
       }
-
-      // Simulate payment processing
-      await new Promise(resolve => setTimeout(resolve, 1500));
 
       // Feature 1.4: Update progress - Step 3: Confirming
       setLoadingStep(3);
@@ -352,96 +342,73 @@ const PaymentPage: React.FC = () => {
                   </Stack>
                 </Paper>
 
-                {useStripePayment ? (
-                  <Box>
-                    {stripeError && (
-                      <Alert severity="error" sx={{ mb: 2 }}>
-                        {stripeError}
-                      </Alert>
-                    )}
-                    <StripePayment
-                      amount={bookingDetails.totalAmount}
-                      currency="inr"
-                      publishableKey={process.env.REACT_APP_STRIPE_PUBLISHABLE_KEY || 'pk_test_51234567890123456789'}
-                      onCreatePaymentIntent={createPaymentIntent}
-                      onSuccess={(paymentIntentId: string) => {
-                        handleConfirmedPayment();
-                      }}
-                      onError={(error: string) => {
-                        setStripeError(error);
-                      }}
+                <Stack spacing={3}>
+                  <StyledTextField
+                    label="Card Number"
+                    name="cardNumber"
+                    value={paymentInfo.cardNumber}
+                    onChange={handleInputChange}
+                    fullWidth
+                    placeholder="1234 5678 9012 3456"
+                    inputProps={{ 
+                      maxLength: 19,
+                      inputMode: 'numeric',
+                      pattern: '[0-9 ]*'
+                    }}
+                    error={paymentInfo.cardNumber.length > 0 && paymentInfo.cardNumber.replace(/\s/g, '').length !== 16}
+                    helperText={
+                      paymentInfo.cardNumber.length > 0 && paymentInfo.cardNumber.replace(/\s/g, '').length !== 16
+                        ? `Please enter exactly 16 digits (you entered ${paymentInfo.cardNumber.replace(/\s/g, '').length} digits)`
+                        : "Enter 16-digit card number (e.g., 4111 1111 1111 1111)"
+                    }
+                  />
+                  <StyledTextField
+                    label="Card Holder Name"
+                    name="cardHolder"
+                    value={paymentInfo.cardHolder}
+                    onChange={handleInputChange}
+                    fullWidth
+                    placeholder="JOHN DOE"
+                    error={paymentInfo.cardHolder.length > 0 && paymentInfo.cardHolder.trim().length < 3}
+                    helperText={
+                      paymentInfo.cardHolder.length > 0 && paymentInfo.cardHolder.trim().length < 3
+                        ? "Card holder name must be at least 3 characters"
+                        : "Enter the name as it appears on your card"
+                    }
+                  />
+                  <Box sx={{ display: 'flex', gap: 2 }}>
+                    <StyledTextField
+                      label="Expiry Date"
+                      name="expiryDate"
+                      value={paymentInfo.expiryDate}
+                      onChange={handleInputChange}
+                      placeholder="MM/YY"
+                      inputProps={{ maxLength: 5 }}
+                      error={paymentInfo.expiryDate.length > 0 && !/^(0[1-9]|1[0-2])\/([0-9]{2})$/.test(paymentInfo.expiryDate)}
+                      helperText={
+                        paymentInfo.expiryDate.length > 0 && !/^(0[1-9]|1[0-2])\/([0-9]{2})$/.test(paymentInfo.expiryDate)
+                          ? "Use MM/YY format"
+                          : "MM/YY"
+                      }
+                    />
+                    <StyledTextField
+                      label="CVV"
+                      name="cvv"
+                      value={paymentInfo.cvv}
+                      onChange={handleInputChange}
+                      type="password"
+                      inputProps={{ maxLength: 3 }}
+                      error={paymentInfo.cvv.length > 0 && !/^[0-9]{3}$/.test(paymentInfo.cvv)}
+                      helperText={
+                        paymentInfo.cvv.length > 0 && !/^[0-9]{3}$/.test(paymentInfo.cvv)
+                          ? "Enter 3-digit CVV"
+                          : "3-digit code"
+                      }
                     />
                   </Box>
-                ) : (
-                  <Stack spacing={3}>
-                    <StyledTextField
-                      label="Card Number"
-                      name="cardNumber"
-                      value={paymentInfo.cardNumber}
-                      onChange={handleInputChange}
-                      fullWidth
-                      placeholder="1234 5678 9012 3456"
-                      inputProps={{ 
-                        maxLength: 19,
-                        inputMode: 'numeric',
-                        pattern: '[0-9 ]*'
-                      }}
-                      error={paymentInfo.cardNumber.length > 0 && paymentInfo.cardNumber.replace(/\s/g, '').length !== 16}
-                      helperText={
-                        paymentInfo.cardNumber.length > 0 && paymentInfo.cardNumber.replace(/\s/g, '').length !== 16
-                          ? `Please enter exactly 16 digits (you entered ${paymentInfo.cardNumber.replace(/\s/g, '').length} digits)`
-                          : "Enter 16-digit card number (e.g., 4111 1111 1111 1111)"
-                      }
-                    />
-                    <StyledTextField
-                      label="Card Holder Name"
-                      name="cardHolder"
-                      value={paymentInfo.cardHolder}
-                      onChange={handleInputChange}
-                      fullWidth
-                      placeholder="JOHN DOE"
-                      error={paymentInfo.cardHolder.length > 0 && paymentInfo.cardHolder.trim().length < 3}
-                      helperText={
-                        paymentInfo.cardHolder.length > 0 && paymentInfo.cardHolder.trim().length < 3
-                          ? "Card holder name must be at least 3 characters"
-                          : "Enter the name as it appears on your card"
-                      }
-                    />
-                    <Box sx={{ display: 'flex', gap: 2 }}>
-                      <StyledTextField
-                        label="Expiry Date"
-                        name="expiryDate"
-                        value={paymentInfo.expiryDate}
-                        onChange={handleInputChange}
-                        placeholder="MM/YY"
-                        inputProps={{ maxLength: 5 }}
-                        error={paymentInfo.expiryDate.length > 0 && !/^(0[1-9]|1[0-2])\/([0-9]{2})$/.test(paymentInfo.expiryDate)}
-                        helperText={
-                          paymentInfo.expiryDate.length > 0 && !/^(0[1-9]|1[0-2])\/([0-9]{2})$/.test(paymentInfo.expiryDate)
-                            ? "Use MM/YY format"
-                            : "MM/YY"
-                        }
-                      />
-                      <StyledTextField
-                        label="CVV"
-                        name="cvv"
-                        value={paymentInfo.cvv}
-                        onChange={handleInputChange}
-                        type="password"
-                        inputProps={{ maxLength: 3 }}
-                        error={paymentInfo.cvv.length > 0 && !/^[0-9]{3}$/.test(paymentInfo.cvv)}
-                        helperText={
-                          paymentInfo.cvv.length > 0 && !/^[0-9]{3}$/.test(paymentInfo.cvv)
-                            ? "Enter 3-digit CVV"
-                            : "3-digit code"
-                        }
-                      />
-                    </Box>
-                  </Stack>
-                )}
+                </Stack>
               </Box>
 
-              {!useStripePayment && (
                 <Button
                   variant="contained"
                   color="primary"
@@ -452,7 +419,8 @@ const PaymentPage: React.FC = () => {
                   sx={{ 
                     py: 2,
                     fontSize: '1.1rem',
-                    position: 'relative'
+                    position: 'relative',
+                    mt: 3
                   }}
                 >
                   {isProcessing ? (
@@ -471,7 +439,6 @@ const PaymentPage: React.FC = () => {
                     `Pay ₹${bookingDetails.totalAmount.toFixed(2)}`
                   )}
                 </Button>
-              )}
             </Box>
           </Fade>
         ) : (
@@ -726,7 +693,7 @@ Thank you for your booking!
             We couldn't process your payment. Please check your connection and try again.
           </Alert>
           <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-            Error Details: Network connection error or server unavailable. Attempt {retryCount}
+                Error Details: Network connection error or server unavailable.
           </Typography>
         </DialogContent>
         <DialogActions>

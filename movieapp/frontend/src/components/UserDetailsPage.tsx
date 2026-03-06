@@ -73,7 +73,6 @@ const UserDetailsPage: React.FC = () => {
 
   // Feature 1.3: Validation warning dialog for form errors
   const [showValidationWarning, setShowValidationWarning] = useState(false);
-  const [pendingPaymentNavigation, setPendingPaymentNavigation] = useState(false);
 
   const handleBlur = (field: keyof UserDetails) => {
     setTouched(prev => ({
@@ -193,7 +192,6 @@ const UserDetailsPage: React.FC = () => {
     
     if (!isValid) {
       setShowValidationWarning(true);
-      setPendingPaymentNavigation(false);
       return;
     }
 
