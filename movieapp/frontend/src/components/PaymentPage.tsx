@@ -84,9 +84,6 @@ const PaymentPage: React.FC = () => {
   // Feature 1.4: Loading progress states
   const [loadingStep, setLoadingStep] = useState(0);
 
-  // Feature 1.5: Network error retry dialog state
-  const [showNetworkError, setShowNetworkError] = useState(false);
-
   // Feature 2.4: Copy to clipboard feedback state
   const [copyFeedback, setCopyFeedback] = useState(false);
 
@@ -98,6 +95,9 @@ const PaymentPage: React.FC = () => {
   const [showConfirmationDialog, setShowConfirmationDialog] = useState(false);
   const [paymentError, setPaymentError] = useState<string>('');
   const [showPaymentErrorDialog, setShowPaymentErrorDialog] = useState(false);
+
+  // Delayed CircularProgress visibility
+  const [showLoading, setShowLoading] = useState(false);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -168,18 +168,24 @@ const PaymentPage: React.FC = () => {
 
   // Feature 1.3: Process the actual payment
   const processPayment = async () => {
+        
     setIsProcessing(true);
     setLoadingStep(0);
     setPaymentError('');
+    setShowLoading(false);
+
+    // Wait 1 second before showing the spinner
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    setShowLoading(true);
 
     try {
       // Feature 1.4: Update progress - Step 1: Validating
       setLoadingStep(1);
-      await new Promise(resolve => setTimeout(resolve, 800));
+      await new Promise(resolve => setTimeout(resolve, 800)); 
 
       // Feature 1.4: Update progress - Step 2: Processing Payment
       setLoadingStep(2);
-      
+      //await new Promise(resolve => setTimeout(resolve, 800)); 
       // Call local payment processing endpoint
       const cardDigits = paymentInfo.cardNumber.replace(/\s/g, '');
       const paymentResponse = await fetch('http://localhost:5000/api/payments/process', {
@@ -223,6 +229,11 @@ const PaymentPage: React.FC = () => {
         } catch (error) {
           const errorMsg = error instanceof Error ? error.message : 'Failed to process booking';
           setPaymentError(errorMsg);
+          
+          // Delay before hiding spinner on error (4 seconds hold)
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          setShowLoading(false);
+          
           setShowPaymentErrorDialog(true);
           setIsProcessing(false);
           return;
@@ -233,6 +244,10 @@ const PaymentPage: React.FC = () => {
       setLoadingStep(3);
       await new Promise(resolve => setTimeout(resolve, 800));
 
+      // Delay before hiding spinner (4 seconds hold)
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      setShowLoading(false);
+
       // Feature 1.2: Generate booking code
       const code = `BK${Date.now().toString().slice(-8)}`;
       setBookingCode(code);
@@ -242,15 +257,14 @@ const PaymentPage: React.FC = () => {
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Payment processing failed';
       setPaymentError(errorMsg);
+      
+      // Delay before hiding spinner on error (4 seconds hold)
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      setShowLoading(false);
+      
       setShowPaymentErrorDialog(true);
       setIsProcessing(false);
     }
-  };
-
-  // Feature 1.5: Retry payment handler
-  const handleRetryPayment = async () => {
-    setShowNetworkError(false);
-    await processPayment();
   };
 
   const isFormValid = () => {
@@ -336,7 +350,7 @@ const PaymentPage: React.FC = () => {
                     <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
                       <Typography variant="h6">Total Amount:</Typography>
                       <Typography variant="h6" fontWeight="bold">
-                        ₹{bookingDetails.totalAmount.toFixed(2)}
+                        ₹{bookingDetails.totalAmount}
                       </Typography>
                     </Box>
                   </Stack>
@@ -423,7 +437,7 @@ const PaymentPage: React.FC = () => {
                     mt: 3
                   }}
                 >
-                  {isProcessing ? (
+                  {showLoading ? (
                     <>
                       <CircularProgress
                         size={24}
@@ -436,7 +450,7 @@ const PaymentPage: React.FC = () => {
                       Processing...
                     </>
                   ) : (
-                    `Pay ₹${bookingDetails.totalAmount.toFixed(2)}`
+                    `Pay ₹${bookingDetails.totalAmount}`
                   )}
                 </Button>
             </Box>
@@ -468,7 +482,7 @@ const PaymentPage: React.FC = () => {
                   <Typography>Email: {bookingDetails.userDetails.email}</Typography>
                   <Typography>Phone: {bookingDetails.userDetails.phone}</Typography>
                   <Typography variant="h6">
-                    Amount Paid: ₹{bookingDetails.totalAmount.toFixed(2)}
+                    Amount Paid: ₹{bookingDetails.totalAmount}
                   </Typography>
 
                   {/* Feature 2.4: Booking code display and copy */}
@@ -529,9 +543,9 @@ Age: ${bookingDetails.userDetails.age}
 
 PAYMENT SUMMARY
 ===============
-Movie Price (per seat): ₹${bookingDetails.totalAmount / bookingDetails.selectedSeats.length}
+Movie Price (per seat): ₹{Math.round(bookingDetails.totalAmount / bookingDetails.selectedSeats.length)}
 Number of Seats: ${bookingDetails.selectedSeats.length}
-Total Amount: ₹${bookingDetails.totalAmount.toFixed(2)}
+Total Amount: ₹{bookingDetails.totalAmount}
 
 ===================================
 Thank you for your booking!
@@ -603,7 +617,7 @@ Thank you for your booking!
             <Box sx={{ backgroundColor: '#f5f5f5', p: 2, borderRadius: 1 }}>
               <Typography variant="body2"><strong>Card Number:</strong> ****{paymentInfo.cardNumber.slice(-4)}</Typography>
               <Typography variant="body2"><strong>Card Holder:</strong> {paymentInfo.cardHolder}</Typography>
-              <Typography variant="body2"><strong>Amount:</strong> ${bookingDetails?.totalAmount.toFixed(2) || '0.00'}</Typography>
+                      <Typography variant="body2"><strong>Amount:</strong> ₹{bookingDetails?.totalAmount || '0'}</Typography>
             </Box>
             <Typography variant="caption" sx={{ color: 'text.secondary' }}>
               By clicking 'Confirm Payment', you authorize this transaction.
@@ -662,7 +676,7 @@ Thank you for your booking!
         <DialogTitle sx={{ fontWeight: 'bold' }}>Processing Your Payment</DialogTitle>
         <DialogContent>
           <Box sx={{ py: 3 }}>
-            <Stepper activeStep={loadingStep} orientation="vertical">
+            <Stepper activeStep={Math.min(loadingStep, 2)} orientation="vertical">
               <Step completed={loadingStep > 1}>
                 <StepLabel>Validating Payment Information</StepLabel>
               </Step>
@@ -674,45 +688,13 @@ Thank you for your booking!
               </Step>
             </Stepper>
             <Box sx={{ display: 'flex', justifyContent: 'center', mt: 3 }}>
-              <CircularProgress />
+              {showLoading && <CircularProgress />}
             </Box>
             <Typography variant="caption" sx={{ display: 'block', textAlign: 'center', mt: 2, color: 'text.secondary' }}>
               Please do not close this window...
             </Typography>
           </Box>
         </DialogContent>
-      </Dialog>
-
-      {/* Feature 1.5: Network Error Retry Dialog */}
-      <Dialog open={showNetworkError} onClose={() => setShowNetworkError(false)}>
-        <DialogTitle sx={{ fontSize: '1.2rem', fontWeight: 'bold', color: 'error.main' }}>
-          Payment Failed
-        </DialogTitle>
-        <DialogContent>
-          <Alert severity="error" sx={{ mb: 2 }}>
-            We couldn't process your payment. Please check your connection and try again.
-          </Alert>
-          <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                Error Details: Network connection error or server unavailable.
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button 
-            onClick={() => setShowNetworkError(false)} 
-            variant="outlined"
-            color="primary"
-          >
-            Cancel
-          </Button>
-          <Button 
-            onClick={handleRetryPayment} 
-            variant="contained"
-            color="error"
-            autoFocus
-          >
-            Retry Payment
-          </Button>
-        </DialogActions>
       </Dialog>
 
       {/* Feature 1.2: Success Toast Notification */}
@@ -727,7 +709,7 @@ Thank you for your booking!
       {/* Feature 2.4: Copy Feedback Toast */}
       <Snackbar
         open={copyFeedback}
-        autoHideDuration={2000}
+        autoHideDuration={600}
         onClose={() => setCopyFeedback(false)}
         message="Booking code copied to clipboard!"
         anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}

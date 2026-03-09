@@ -12,6 +12,7 @@ interface SeatGridWrapperProps {
   bookedSeats: number[];
   selectedSeats: number[];
   showtime: string;
+  moviePrice?: number;
   onSeatSelect: (seatId: number) => void;
 }
 
@@ -22,6 +23,7 @@ const SeatGridWrapper: React.FC<SeatGridWrapperProps> = ({
   bookedSeats,
   selectedSeats,
   showtime,
+  moviePrice = 0,
   onSeatSelect
 }) => {
   const seatGridRef = useRef<any>(null);
@@ -36,6 +38,7 @@ const SeatGridWrapper: React.FC<SeatGridWrapperProps> = ({
       element.setAttribute('booked-seats', JSON.stringify(bookedSeats));
       element.setAttribute('selected-seats', JSON.stringify(selectedSeats));
       element.setAttribute('showtime', showtime);
+      element.setAttribute('movie-price', moviePrice.toString());
 
       // Listen for custom events from Web Component
       const handleSeatSelected = (event: any) => {
@@ -48,7 +51,7 @@ const SeatGridWrapper: React.FC<SeatGridWrapperProps> = ({
         element.removeEventListener('seat-selected', handleSeatSelected);
       };
     }
-  }, [totalSeats, seatsPerRow, availableSeats, bookedSeats, selectedSeats, showtime, onSeatSelect]);
+  }, [totalSeats, seatsPerRow, availableSeats, bookedSeats, selectedSeats, showtime, moviePrice, onSeatSelect]);
 
   // Require Web Component to be registered
   useEffect(() => {

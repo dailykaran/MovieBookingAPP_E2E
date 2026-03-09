@@ -11,6 +11,7 @@ interface SeatGridConfig {
   bookedSeats: number[];
   selectedSeats: number[];
   showtime: string;
+  moviePrice: number;
 }
 
 class SeatGridElement extends HTMLElement {
@@ -27,7 +28,8 @@ class SeatGridElement extends HTMLElement {
       availableSeats: [],
       bookedSeats: [],
       selectedSeats: [],
-      showtime: ''
+      showtime: '',
+      moviePrice: 0
     };
   }
 
@@ -46,7 +48,8 @@ class SeatGridElement extends HTMLElement {
       availableSeats: JSON.parse(this.getAttribute('available-seats') || '[]'),
       bookedSeats: JSON.parse(this.getAttribute('booked-seats') || '[]'),
       selectedSeats: JSON.parse(this.getAttribute('selected-seats') || '[]'),
-      showtime: this.getAttribute('showtime') || ''
+      showtime: this.getAttribute('showtime') || '',
+      moviePrice: parseFloat(this.getAttribute('movie-price') || '0')
     };
   }
 
@@ -78,7 +81,7 @@ class SeatGridElement extends HTMLElement {
         </div>
         <div class="seat-info">
           <p>Total Selected: <strong>${this.config.selectedSeats.length}</strong> seats</p>
-          <p>Price: <strong>₹${this.config.selectedSeats.length * 250}</strong></p>
+          <p>Price: <strong>₹${this.config.selectedSeats.length * this.config.moviePrice}</strong></p>
         </div>
       </div>
     `;
@@ -299,7 +302,7 @@ class SeatGridElement extends HTMLElement {
 
   // Lifecycle: attributes changed
   static get observedAttributes() {
-    return ['selected-seats', 'available-seats', 'booked-seats'];
+    return ['selected-seats', 'available-seats', 'booked-seats', 'movie-price'];
   }
 
   attributeChangedCallback(name: string, oldValue: string, newValue: string) {

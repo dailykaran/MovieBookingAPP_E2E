@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { log } from 'node:console';
 
 
 test('Movie cards are visible and actionable( focus)', async ({ page }) => {
@@ -111,8 +112,10 @@ test('Loading spinner appears during booking', async ({ page }) => {
   }
 
   // Select one seat
-  const seats = page.locator('button:enabled').filter({ hasText: /^\d+$/ });
-  const seatCount = await seats.count().catch(() => 0);
+  const shadowElement = page.locator('seat-grid');
+  const seats = await shadowElement.locator('.seat-grid-container .seat-grid .seat.available.clickable');
+  const seatCount = await seats.count();
+  console.log(seatCount)
   if (seatCount > 0) {
     await seats.first().click();
     await page.waitForTimeout(500);
@@ -122,7 +125,7 @@ test('Loading spinner appears during booking', async ({ page }) => {
   const confirmBtn = page.locator('button').filter({ hasText: /Confirm|Book/ }).first();
   if (await confirmBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
     await confirmBtn.click();
-    await page.waitForTimeout(2000);
+    await page.waitForTimeout(500);
   }
   
   // ✅ Verify that the page is interactive and accepting clicks

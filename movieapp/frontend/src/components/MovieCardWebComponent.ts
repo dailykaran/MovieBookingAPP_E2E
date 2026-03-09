@@ -8,6 +8,7 @@ interface MovieCardData {
   id: number;
   title: string;
   releaseDate: string;
+  price?: number;
   trailerUrl?: string;
   rating?: number;
   reviews?: number;
@@ -26,6 +27,7 @@ class MovieCardElement extends HTMLElement {
       id: 0,
       title: '',
       releaseDate: '',
+      price: 0,
       rating: 0,
       reviews: 0,
       poster: '',
@@ -44,6 +46,7 @@ class MovieCardElement extends HTMLElement {
       id: parseInt(this.getAttribute('movie-id') || '0'),
       title: this.getAttribute('title') || 'Untitled',
       releaseDate: this.getAttribute('release-date') || '',
+      price: parseFloat(this.getAttribute('price') || '0'),
       rating: parseFloat(this.getAttribute('rating') || '0'),
       reviews: parseInt(this.getAttribute('reviews') || '0'),
       poster: this.getAttribute('poster') || 'https://via.placeholder.com/200x300?text=No+Poster',
@@ -60,6 +63,13 @@ class MovieCardElement extends HTMLElement {
         <span class="stars">${this.renderStars(movieData.rating!)}</span>
         <span class="rating-value">${movieData.rating!.toFixed(1)}</span>
         <span class="reviews-count">(${movieData.reviews} reviews)</span>
+      </div>
+    ` : '';
+
+    const priceHTML = movieData.price ? `
+      <div class="price">
+        <span class="price-label">Price:</span>
+        <span class="price-value">₹${movieData.price}</span>
       </div>
     ` : '';
 
@@ -93,6 +103,7 @@ class MovieCardElement extends HTMLElement {
           <h3 class="title">${this.escapeHTML(movieData.title)}</h3>
           <p class="release-date">${this.formatDate(movieData.releaseDate)}</p>
           ${reviewsHTML}
+          ${priceHTML}
           ${trailerButton}
           ${showtimesHTML}
         </div>
@@ -222,6 +233,28 @@ class MovieCardElement extends HTMLElement {
           font-size: 0.85em;
         }
 
+        .price {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          margin: 12px 0;
+          padding: 8px 0;
+          border-top: 1px solid #eee;
+          border-bottom: 1px solid #eee;
+          font-size: 1em;
+        }
+
+        .price-label {
+          font-weight: 500;
+          color: var(--text-primary);
+        }
+
+        .price-value {
+          font-weight: bold;
+          font-size: 1.2em;
+          color: var(--hover-color);
+        }
+
         .trailer-btn {
           width: 100%;
           background: var(--primary-color);
@@ -331,7 +364,7 @@ class MovieCardElement extends HTMLElement {
   }
 
   static get observedAttributes() {
-    return ['title', 'release-date', 'rating', 'poster', 'showtimes'];
+    return ['title', 'release-date', 'rating', 'poster', 'price', 'showtimes'];
   }
 
   attributeChangedCallback() {

@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Box, Paper, Typography, Grid, styled } from '@mui/material';
+import React from 'react';
+import { Box, Paper, Typography, styled } from '@mui/material';
 import MovieList from './MovieList';
 
 const IframeContainer = styled(Paper)(({ theme }) => ({
@@ -45,9 +45,6 @@ const InfoBox = styled(Box)(({ theme }) => ({
 }));
 
 const MovieListWithIframe: React.FC = () => {
-  // Default movie ID to show in iframe
-  const defaultMovieId = 1;
-
   return (
     <Box sx={{ width: '100%' }}>
       {/* Iframe Section */}

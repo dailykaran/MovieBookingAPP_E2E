@@ -17,17 +17,7 @@ import {
   Fade,
   Chip,
   Divider,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
-  IconButton,
 } from '@mui/material';
-import CloseIcon from '@mui/icons-material/Close';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { styled, keyframes } from '@mui/material/styles';
 
 const fadeInUp = keyframes`
@@ -70,13 +60,6 @@ const MovieDetails: React.FC = () => {
   const { selectedMovie, loading, error } = useSelector((state: RootState) => state.movies);
   const [selectedTime, setSelectedTime] = useState<string>('');
   const [selectedSeats, setSelectedSeats] = useState<number[]>([]);
-  // Feature 1.1: Seat Conflict Alert Dialog
-  const [seatConflictError, setSeatConflictError] = useState<string>('');
-  const [unavailableSeats, setUnavailableSeats] = useState<number[]>([]);
-  // Feature 1.2: Validation Alerts for missing selections
-  const [validationAlert, setValidationAlert] = useState<string>(''); // 'noSeats' | 'noShowtime' | ''
-  // Feature 2.1: Help/FAQ Modal
-  const [showHelpDialog, setShowHelpDialog] = useState(false);
   // Trailer Dialog
   const [trailerDialogOpen, setTrailerDialogOpen] = useState(false);
 
@@ -519,6 +502,7 @@ const MovieDetails: React.FC = () => {
                   bookedSeats={selectedMovie.showtimeSeats?.find(s => s.showtime === selectedTime)?.bookedSeats || []}
                   selectedSeats={selectedSeats}
                   showtime={selectedTime}
+                  moviePrice={selectedMovie.price}
                   onSeatSelect={handleSeatClick}
                 />
                 <Box sx={{ mt: 2, textAlign: 'center', fontSize: '0.85rem', color: 'text.secondary' }}>
@@ -546,13 +530,13 @@ const MovieDetails: React.FC = () => {
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <Typography variant="subtitle1">Price per Ticket:</Typography>
                       <Typography variant="subtitle1" fontWeight="bold">
-                        ${selectedMovie.price.toFixed(2)}
+                        ₹{selectedMovie.price}
                       </Typography>
                     </Box>
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <Typography variant="h6">Total Amount:</Typography>
                       <Typography variant="h6" fontWeight="bold" color="primary.main">
-                        ₹{(selectedMovie.price * selectedSeats.length).toFixed(2)}
+                        ₹{(selectedMovie.price * selectedSeats.length)}
                       </Typography>
                     </Box>
                   </Stack>
@@ -624,161 +608,7 @@ const MovieDetails: React.FC = () => {
         onClose={() => setTrailerDialogOpen(false)}
       />
 
-      {/* Feature 1.1: Seat Conflict Alert Dialog */}
-      <Dialog open={seatConflictError === 'conflict'} onClose={() => setSeatConflictError('')}>
-        <DialogTitle sx={{ fontSize: '1.2rem', fontWeight: 'bold', color: 'error.main' }}>
-          Seat Not Available
-        </DialogTitle>
-        <DialogContent sx={{ minWidth: 400 }}>
-          <Typography sx={{ mb: 2, color: 'text.secondary' }}>
-            The following seats are no longer available. They have been removed from your selection.
-          </Typography>
-          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-            {unavailableSeats.map(seat => (
-              <Chip 
-                key={seat} 
-                label={`Seat ${seat}`} 
-                color="error" 
-                variant="outlined"
-              />
-            ))}
-          </Box>
-          <Typography sx={{ mt: 2, fontSize: '0.9rem', color: 'text.secondary' }}>
-            Please select alternative seats or try again with other available seats.
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setSeatConflictError('')} variant="contained" color="primary">
-            Understood
-          </Button>
-        </DialogActions>
-      </Dialog>
 
-      {/* Feature 1.2: No Seats Selected Warning Dialog */}
-      <Dialog open={validationAlert === 'noSeats'} onClose={() => setValidationAlert('')}>
-        <DialogTitle sx={{ fontSize: '1.2rem', fontWeight: 'bold', color: 'warning.main' }}>
-          No Seats Selected
-        </DialogTitle>
-        <DialogContent sx={{ minWidth: 400 }}>
-          <Typography sx={{ color: 'text.secondary' }}>
-            Please select at least one seat before confirming your booking.
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setValidationAlert('')} variant="contained" color="primary">
-            Select Seats
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Feature 1.2: No Showtime Selected Warning Dialog */}
-      <Dialog open={validationAlert === 'noShowtime'} onClose={() => setValidationAlert('')}>
-        <DialogTitle sx={{ fontSize: '1.2rem', fontWeight: 'bold', color: 'warning.main' }}>
-          Showtime Not Selected
-        </DialogTitle>
-        <DialogContent sx={{ minWidth: 400 }}>
-          <Typography sx={{ color: 'text.secondary' }}>
-            Please select a showtime before confirming your booking.
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setValidationAlert('')} variant="contained" color="primary">
-            Select Showtime
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Feature 2.1: Help/FAQ Modal Dialog */}
-      <Dialog 
-        open={showHelpDialog} 
-        onClose={() => setShowHelpDialog(false)}
-        maxWidth="sm"
-        fullWidth
-      >
-        <DialogTitle sx={{ 
-          fontSize: '1.3rem', 
-          fontWeight: 'bold', 
-          display: 'flex', 
-          justifyContent: 'space-between',
-          alignItems: 'center'
-        }}>
-          <span>Help & FAQ</span>
-          <IconButton 
-            size="small" 
-            onClick={() => setShowHelpDialog(false)}
-          >
-            <CloseIcon />
-          </IconButton>
-        </DialogTitle>
-        <DialogContent sx={{ maxHeight: '60vh', overflow: 'auto' }}>
-          <Accordion defaultExpanded>
-            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-              <Typography fontWeight="bold">How do I select seats?</Typography>
-            </AccordionSummary>
-            <AccordionDetails>
-              <Typography variant="body2">
-                Click on any available (white) seat in the theater grid. Selected seats will be highlighted in blue. 
-                You can select multiple seats for group bookings.
-              </Typography>
-            </AccordionDetails>
-          </Accordion>
-
-          <Accordion>
-            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-              <Typography fontWeight="bold">What does each seat color mean?</Typography>
-            </AccordionSummary>
-            <AccordionDetails>
-              <Box>
-                <Typography variant="body2" sx={{ mb: 1 }}>
-                  <strong>White:</strong> Available seats ready for booking
-                </Typography>
-                <Typography variant="body2" sx={{ mb: 1 }}>
-                  <strong>Blue:</strong> Seats you have selected
-                </Typography>
-                <Typography variant="body2">
-                  <strong>Gray:</strong> Already booked seats (unavailable)
-                </Typography>
-              </Box>
-            </AccordionDetails>
-          </Accordion>
-
-          <Accordion>
-            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-              <Typography fontWeight="bold">Can I change my selection?</Typography>
-            </AccordionSummary>
-            <AccordionDetails>
-              <Typography variant="body2">
-                Yes! You can click on selected seats to deselect them, or click on new available seats. 
-                When you change the showtime, your selections will be cleared.
-              </Typography>
-            </AccordionDetails>
-          </Accordion>
-
-          <Accordion>
-            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-              <Typography fontWeight="bold">What happens if a seat becomes unavailable?</Typography>
-            </AccordionSummary>
-            <AccordionDetails>
-              <Typography variant="body2">
-                If someone books a seat you selected before you complete payment, we'll notify you and remove it from your selection. 
-                You can choose alternative seats and continue.
-              </Typography>
-            </AccordionDetails>
-          </Accordion>
-
-          <Accordion>
-            <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-              <Typography fontWeight="bold">How is the total amount calculated?</Typography>
-            </AccordionSummary>
-            <AccordionDetails>
-              <Typography variant="body2">
-                Total Amount = Movie Price × Number of Selected Seats. 
-                You can see the updated total in the booking summary box.
-              </Typography>
-            </AccordionDetails>
-          </Accordion>
-        </DialogContent>
-      </Dialog>
     </Container>
   );
 };

@@ -43,13 +43,7 @@ const MovieList: React.FC = () => {
   }, [dispatch]);
 
   const handleBookNow = (movie: Movie) => {
-    if (movie.title === 'Forrest Gump') {
-      // Navigate to a broken URL for Forrest Gump
-      window.location.href = 'http://localhost:3000/broken-booking-link';
-    } else {
-      // Navigate normally to movie details
-      navigate(`/movie/${movie.id}`);
-    }
+    navigate(`/movie/${movie.id}`);
   };
 
   const filteredMovies = movies.filter((movie: Movie) =>
@@ -111,7 +105,7 @@ const MovieList: React.FC = () => {
                   Duration: {movie.duration} minutes
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
-                  Price: ${movie.price}
+                  Price: ₹{movie.price}
                 </Typography>
               </CardContent>
               <CardActions>
