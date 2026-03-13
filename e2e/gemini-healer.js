@@ -18,11 +18,12 @@
 
 import fs from 'fs';
 import path from 'path';
-import { execFileSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import { generateHtmlReport } from './healer-report-generator.js';
+import AdmZip from 'adm-zip';
 
 // Get the directory of the current script
 const __filename = fileURLToPath(import.meta.url);
@@ -37,8 +38,8 @@ const GEMINI_API_KEY_TEST = process.env.GEMINI_API_KEY_TEST;
 const HEALER_AUTO_FIX = process.env.HEALER_AUTO_FIX === 'true';
 const HEALER_VERBOSE = process.env.HEALER_VERBOSE === 'true';
 const HEALER_MAX_FILE_SIZE = parseInt(process.env.HEALER_MAX_FILE_SIZE || '1048576', 10); // 1MB
-const HEALER_BACKUP_DIR = process.env.HEALER_BACKUP_DIR || path.join(process.cwd(), '.healer-backups');
-const HEALER_AUDIT_LOG = process.env.HEALER_AUDIT_LOG || path.join(process.cwd(), '.healer-audit.log');
+const HEALER_BACKUP_DIR = process.env.HEALER_BACKUP_DIR || path.join(process.cwd(), 'reports/audit/.healer-backups');
+const HEALER_AUDIT_LOG = process.env.HEALER_AUDIT_LOG || path.join(process.cwd(), 'reports/audit/.healer-audit.log');
 const HEALER_MAX_RETRIES = parseInt(process.env.HEALER_MAX_RETRIES || '3', 10);
 const HEALER_API_TIMEOUT = parseInt(process.env.HEALER_API_TIMEOUT || '60000', 10); // 60 seconds
 const HEALER_API_RATE_LIMIT = parseInt(process.env.HEALER_API_RATE_LIMIT || '5', 10); // calls per minute
@@ -128,7 +129,7 @@ function getSessionStatistics() {
  * Write logs to JSON file (healing-logs.json)
  */
 function persistLogs() {
-  const logsDir = path.join(process.cwd(), 'test-results');
+  const logsDir = path.join(process.cwd(), 'reports/results');
   if (!fs.existsSync(logsDir)) {
     fs.mkdirSync(logsDir, { recursive: true });
   }
@@ -264,11 +265,11 @@ function validateEnvironment() {
   }
   
   // Check test results exist
-  const resultsPath = path.join(process.cwd(), 'test-results', 'results.json');
+  const resultsPath = path.join(process.cwd(), 'reports/results', 'results.json');
   if (!fs.existsSync(resultsPath)) {
-    checks.push({ name: 'test-results/results.json', ok: false, hint: 'Run tests first with: npm test' });
+    checks.push({ name: 'reports/results/results.json', ok: false, hint: 'Run tests first with: npm test' });
   } else {
-    checks.push({ name: 'test-results/results.json', ok: true });
+    checks.push({ name: 'reports/results/results.json', ok: true });
   }
   
   // Check tests directory
@@ -448,12 +449,25 @@ function validateGeneratedCode(code) {
     issues.push('Suspicious imports detected (fs, child_process, os)');
   }
   
-  if (!code.includes('test(') && !code.includes('it(')) {
-    issues.push('No test function found');
-  }
+  // Check if this is a partial fix (just a locator) or a full test
+  const isPartialFix = (code.includes('page.locator') || code.includes('.locator(')) && 
+                        !code.includes('test(') && 
+                        !code.includes('it(');
   
-  if (!code.includes('expect(')) {
-    issues.push('No assertions found');
+  if (!isPartialFix) {
+    // Full test functions require test() and expect()
+    if (!code.includes('test(') && !code.includes('it(')) {
+      issues.push('No test function found');
+    }
+    
+    if (!code.includes('expect(')) {
+      issues.push('No assertions found');
+    }
+  } else {
+    // Partial fixes only need valid locator syntax
+    if (!code.includes('page.locator') && !code.includes('.locator(')) {
+      issues.push('No page.locator found in partial fix');
+    }
   }
   
   return {
@@ -542,12 +556,23 @@ function atomicFileWrite(filePath, content) {
 
 /**
  * Check if test should be healed based on error type (Conditional Healing)
+ /**
+ * Determine if test should be healed (skip infrastructure errors, but allow DOM architecture issues)
  */
-function shouldHealTest(testInfo) {
+function shouldHealTest(testInfo, testCode = '') {
   const lowerError = testInfo.error.toLowerCase();
   
+  // Check if this is a DOM architecture issue - these ARE fixable
+  const isDOMIssue = isDOMArchitectureError(testInfo.error, testCode);
+  
+  // Skip infrastructure/network errors, but heal DOM architecture issues
   for (const keyword of SKIP_HEALING_KEYWORDS) {
     if (lowerError.includes(keyword)) {
+      // Allow healing of DOM architecture issues even if they match certain keywords
+      if (isDOMIssue && (keyword === 'timeout' || !keyword.includes('network'))) {
+        console.log(`✅ Allowing heal for DOM architecture issue (timeout on Shadow DOM element)`);
+        return true;
+      }
       return false;
     }
   }
@@ -669,33 +694,46 @@ function cleanupOldBackups() {
 
 /**
  * Cleanup old HTML reports to prevent disk bloat (Report Cleanup)
+ * Keeps the 5 most recent reports instead of deleting all
  */
 function cleanupOldReports() {
   try {
-    const reportDir = path.join(process.cwd(), 'test-results');
+    const reportDir = path.join(process.cwd(), 'reports/healer');
     if (!fs.existsSync(reportDir)) return;
     
     const files = fs.readdirSync(reportDir);
-    let deletedCount = 0;
+    const KEEP_RECENT_COUNT = 5; // Keep last 5 reports
     
-    files.forEach(file => {
-      // Match healer report HTML files: healer-report-*.html, healer-error-report-*.json
-      if (file.match(/^healer.*\.(html|json)$/) && file !== 'results.json' && file !== 'healing-logs.json') {
-        const filePath = path.join(reportDir, file);
+    // Get healer report files with timestamps
+    const reportFiles = files
+      .filter(file => file.match(/^healer-report-.*\.html$/))
+      .map(file => ({
+        name: file,
+        path: path.join(reportDir, file),
+        time: fs.statSync(path.join(reportDir, file)).mtimeMs
+      }))
+      .sort((a, b) => b.time - a.time); // Sort by most recent first
+    
+    // Delete only if we have more than KEEP_RECENT_COUNT reports
+    if (reportFiles.length > KEEP_RECENT_COUNT) {
+      const toDelete = reportFiles.slice(KEEP_RECENT_COUNT); // Keep first N, delete rest
+      let deletedCount = 0;
+      
+      toDelete.forEach(file => {
         try {
-          fs.unlinkSync(filePath);
+          fs.unlinkSync(file.path);
           deletedCount++;
           if (HEALER_VERBOSE) {
-            console.log(`🗑️  Removed old report: ${file}`);
+            console.log(`🗑️  Removed old report: ${file.name}`);
           }
         } catch (err) {
-          console.warn(`⚠️  Could not delete ${file}: ${err.message}`);
+          console.warn(`⚠️  Could not delete ${file.name}: ${err.message}`);
         }
+      });
+      
+      if (deletedCount > 0) {
+        console.log(`🧹 Cleaned up ${deletedCount} old report(s), keeping last ${KEEP_RECENT_COUNT}\n`);
       }
-    });
-    
-    if (deletedCount > 0) {
-      console.log(`🧹 Cleaned up ${deletedCount} old report(s)\n`);
     }
   } catch (err) {
     console.error(`⚠️  Error cleaning up reports: ${err.message}`);
@@ -729,7 +767,7 @@ function generateErrorReport(healingResults) {
   };
   
   try {
-    const reportPath = path.join(process.cwd(), 'test-results', `healer-error-report-${Date.now()}.json`);
+    const reportPath = path.join(process.cwd(), 'reports/healer', `healer-error-report-${Date.now()}.json`);
     const reportDir = path.dirname(reportPath);
     if (!fs.existsSync(reportDir)) {
       fs.mkdirSync(reportDir, { recursive: true });
@@ -772,7 +810,7 @@ function validateTestResultsSchema(results) {
  * Fetch and parse test results
  */
 function getFailedTests() {
-  const resultsPath = path.join(process.cwd(), 'test-results', 'results.json');
+  const resultsPath = path.join(process.cwd(), 'reports/results', 'results.json');
 
   if (!fs.existsSync(resultsPath)) {
     console.warn('⚠️  No test results found. Run tests first with: npm test');
@@ -1116,12 +1154,389 @@ function generateSelectorGuidance(testCode) {
 }
 
 /**
+ * Detect DOM Architecture Issues (Shadow DOM, iframes, Web Components)
+ */
+function detectDOMArchitectureIssues(testCode, errorMessage) {
+  const issues = {
+    hasShadowDOM: false,
+    hasIframes: false,
+    hasWebComponents: false,
+    hasInaccessibleLocators: false,
+    potentialArchitectureIssues: [],
+    recommendations: []
+  };
+
+  // Detect Shadow DOM usage patterns
+  const shadowDOMPatterns = [
+    /page\.locator\(['"`]([^'"`]+)['"]\s*\)\.getByRole/,  // locator().getByRole() pattern
+    /locator\s*\(\s*['"`](.*shadow|seat-grid|custom-element)['"]\s*\)/i,
+    /shadowElement|seat-grid|getByRole\s*\(\s*['"`]button['"`]/i,
+    /const\s+shadowElement\s*=\s*page\.locator/,
+    /page\.locator\(['"`]button[^'"`]*['"]\).*seat/i,  // Targeting buttons for seat elements
+    /page\.locator\(['"`]button.*has-text.*Seat/i,  // Button with "Seat" text (likely in Shadow DOM)
+  ];
+
+  shadowDOMPatterns.forEach(pattern => {
+    if (pattern.test(testCode)) {
+      issues.hasShadowDOM = true;
+    }
+  });
+
+  // Additional check: if referencing seat-grid anywhere AND trying to access buttons
+  if (/seat-grid|seat[-_]grid/i.test(testCode) && /button|locator.*button/i.test(testCode)) {
+    issues.hasShadowDOM = true;
+    issues.potentialArchitectureIssues.push('seat-grid component detected with button access - likely Shadow DOM');
+  }
+
+  // Detect iframe usage
+  if (/iframe|frameLocator|frame\(|frame\s*\{/i.test(testCode)) {
+    issues.hasIframes = true;
+  }
+
+  // Detect Web Components (custom elements with hyphens)
+  if (/page\.locator\(['"`]([a-z]+-[a-z]+)['"]\)/i.test(testCode) || /<[a-z]+-[a-z]/i.test(testCode)) {
+    issues.hasWebComponents = true;
+  }
+
+  // Detect inaccessible locators
+  if (/locator\(['"`][^'"`]*['"]\)\.getByRole/i.test(testCode) && issues.hasShadowDOM) {
+    issues.hasInaccessibleLocators = true;
+  }
+
+  // Analyze error message for architecture clues
+  if (errorMessage) {
+    const errorLower = errorMessage.toLowerCase();
+    
+    // "0 found" or timeout patterns suggest Shadow DOM accessibility issues
+    if ((errorMessage.includes('0 found') || errorMessage.includes('No elements') || errorMessage.includes('Timeout')) && 
+        (testCode.includes('shadowElement') || testCode.includes('seat-grid') || testCode.includes('button:has-text') || /page\.locator\(['"`]([a-z]+-[a-z]+)['"]\)/.test(testCode))) {
+      issues.potentialArchitectureIssues.push('Shadow DOM elements not accessible via standard locators - likely need piercing');
+      issues.hasInaccessibleLocators = true;
+      issues.hasShadowDOM = true;
+    }
+
+    if (errorLower.includes('shadow') || errorMessage.includes('ShadowRoot')) {
+      issues.hasShadowDOM = true;
+      issues.potentialArchitectureIssues.push('Confirmed Shadow DOM architecture issue');
+    }
+  }
+
+  // Generate recommendations
+  if (issues.hasShadowDOM) {
+    issues.recommendations.push('Use nested locators with class selectors: page.locator("seat-grid").locator(".seat.available")');
+    issues.recommendations.push('AVOID: page.locator("button") for Shadow DOM - must use nested locators with CSS classes');
+    issues.recommendations.push('For specific button in Shadow DOM: page.locator("seat-grid").locator(".seat.clickable")  // Use class, not text');  
+  }
+
+  if (issues.hasWebComponents) {
+    issues.recommendations.push('Web Components detected - use nested locators: page.locator("component-name").locator("selector")');
+    issues.recommendations.push('Use nested locator chains for Web Component internals');
+  }
+
+  if (issues.hasIframes) {
+    issues.recommendations.push('Use frameLocator(): page.frameLocator("iframe").locator("button")');
+    issues.recommendations.push('For named frames: page.frame({ name: "name" }).locator("button")');
+  }
+
+  return issues;
+}
+
+/**
+ * Generate DOM Architecture Guidance for Gemini Prompt
+ */
+function generateDOMArchitectureGuidance(domIssues) {
+  if (!domIssues) return '';
+  
+  const hasIssues = domIssues.hasShadowDOM || domIssues.hasIframes || domIssues.hasWebComponents || 
+                   domIssues.potentialArchitectureIssues.length > 0;
+  
+  if (!hasIssues) return '';
+
+  let guidance = '\n\n### 🏗️ DOM ARCHITECTURE ANALYSIS - CRITICAL\n';
+
+  if (domIssues.hasShadowDOM || domIssues.hasWebComponents) {
+    guidance += '\n**SHADOW DOM / WEB COMPONENTS DETECTED:**\n';
+    guidance += 'Shadow DOM Found: YES\n';
+    guidance += '\n**KEY LIMITATION**: getByRole(), getByText(), getByLabel(), and direct page.locator() DO NOT pierce Shadow DOM.\n';
+    guidance += '\n**SPECIFIC FIX FOR SEAT-GRID SHADOW DOM**:\n';
+    guidance += '- PROBLEM: `const seatButtons = page.locator("button:has-text(\\"Seat\\")");` ❌ FAILS\n';
+    guidance += '  (This searches entire page but seat buttons are inside seat-grid Shadow DOM)\n';
+    guidance += '- FIX 1: `const seatButtons = page.locator("seat-grid").locator(".seat.available");` ✅ WORKS (Nested with Class)\n';
+    guidance += '- FIX 2: `const seatButtons = page.locator("seat-grid").locator(".seat.available.clickable");` ✅ WORKS (Multiple Classes)\n';
+    guidance += '\n**DO NOT USE** for Shadow DOM elements:\n';
+    guidance += '- ❌ page.locator("button") alone when buttons are in Shadow DOM\n';
+    guidance += '- ❌ getByRole() on Shadow DOM elements\n';
+    guidance += '- ❌ getByText() on Shadow DOM elements\n';
+    guidance += '- ❌ :has-text() filters - use CSS classes instead for reliability\n';
+    guidance += '\n**MUST USE** for Shadow DOM elements:\n';
+    guidance += '- ✅ Nested locators with CSS classes: page.locator("parent").locator("child.classname")\n';
+    guidance += '- ✅ Combine multiple classes: page.locator("parent").locator("child.class1.class2")\n';
+    guidance += '- ✅ frameLocator() for iframes\n';
+  }
+
+  if (domIssues.hasIframes) {
+    guidance += '\n**IFRAMES DETECTED:**\n';
+    guidance += '- Use: `page.frameLocator("iframe-selector").locator("button")`\n';
+    guidance += '- Or: `page.frame({ name: "frameName" }).locator("button")`\n';
+  }
+
+  if (domIssues.potentialArchitectureIssues.length > 0) {
+    guidance += '\n**IDENTIFIED ISSUES**:\n';
+    domIssues.potentialArchitectureIssues.forEach(issue => {
+      guidance += `- ${issue}\n`;
+    });
+  }
+
+  if (domIssues.recommendations.length > 0) {
+    guidance += '\n**IMPLEMENTATION FIXES**:\n';
+    domIssues.recommendations.forEach((rec, idx) => {
+      guidance += `${idx + 1}. ${rec}\n`;
+    });
+  }
+
+  return guidance;
+}
+
+/**
+ * Check if error is likely DOM architecture related
+ */
+function isDOMArchitectureError(errorMessage, testCode) {
+  if (!errorMessage) return false;
+  
+  const errorLower = errorMessage.toLowerCase();
+  
+  // Patterns indicating DOM architecture issues
+  const architecturePatterns = [
+    /0 found/,  // No elements found typical in Shadow DOM
+    /timeout.*element/,
+    /resolved to/,  // Strict mode
+  ];
+
+  // Check if test involves custom elements, Shadow DOM, or seat components
+  const hasCustomElements = /page\.locator\(['"`]([a-z]+-[a-z]+)['"]\)/i.test(testCode);
+  const hasShadowQuery = /shadowElement|seat-grid|button.*has-text.*Seat|page\.locator.*button.*seat/i.test(testCode);
+  const hasDirectButtonSearch = /page\.locator\(['"`]button[^'"`]*['"]\)/i.test(testCode);
+  
+  // If "0 found" error AND test tries to access buttons/elements directly (without piercing)
+  // AND mentions seat-grid or custom elements, it's likely a Shadow DOM issue
+  return architecturePatterns.some(p => p.test(errorLower)) && (hasCustomElements || hasShadowQuery || (hasDirectButtonSearch && /seat/i.test(testCode)));
+}
+
+/**
+ * Find trace file for a failed test
+ */
+function findTraceFileForTest(testName) {
+  try {
+    const testResultsDir = path.join(process.cwd(), 'test-results');
+    
+    if (!fs.existsSync(testResultsDir)) {
+      if (HEALER_VERBOSE) console.log('📋 test-results directory not found');
+      return null;
+    }
+    
+    // Extract base name without .spec.ts or .test.ts
+    const baseName = testName.replace(/\.(spec|test)\.tsx?$/, '');
+    
+    // Look for test result directory matching the test name
+    // Prioritize retry directories (they have -retry1, -retry2, etc. suffix)
+    const testDirs = fs.readdirSync(testResultsDir).filter(dir => {
+      return dir.includes(baseName);
+    });
+    
+    if (testDirs.length === 0) {
+      if (HEALER_VERBOSE) console.log(`📋 No trace directory found for test: ${testName}`);
+      return null;
+    }
+    
+    // Prioritize retry directories (they're more likely to have traces)
+    const sortedDirs = testDirs.sort((a, b) => {
+      const aHasRetry = /retry\d+/.test(a);
+      const bHasRetry = /retry\d+/.test(b);
+      // Retry directories come first
+      if (aHasRetry && !bHasRetry) return -1;
+      if (!aHasRetry && bHasRetry) return 1;
+      // Among retries, prefer higher numbers (latest retry)
+      if (aHasRetry && bHasRetry) {
+        const aRetry = parseInt((a.match(/retry(\d+)/) || [, 0])[1]);
+        const bRetry = parseInt((b.match(/retry(\d+)/) || [, 0])[1]);
+        return bRetry - aRetry;
+      }
+      return 0;
+    });
+
+    const testDir = path.join(testResultsDir, sortedDirs[0]);
+    const traceFile = fs.readdirSync(testDir).find(f => f.includes('trace') && f.endsWith('.zip'));
+    
+    if (!traceFile) {
+      if (HEALER_VERBOSE) console.log(`📋 No trace.zip found in ${testDir}`);
+      return null;
+    }
+    
+    if (HEALER_VERBOSE) console.log(`📋 Found trace file: ${path.join(testDir, traceFile)}`);
+    return path.join(testDir, traceFile);
+  } catch (err) {
+    if (HEALER_VERBOSE) console.log(`⚠️  Error finding trace file: ${err.message}`);
+    return null;
+  }
+}
+
+/**
+ * Extract button text and element information from Playwright trace file
+ */
+function extractElementsFromTrace(tracePath) {
+  try {
+    if (!tracePath || !fs.existsSync(tracePath)) {
+      return {
+        buttons: [],
+        inputs: [],
+        dialogs: [],
+        htmlSnapshots: [],
+        error: 'Trace file not found'
+      };
+    }
+    
+    const zip = new AdmZip(tracePath);
+    const entries = zip.getEntries();
+    
+    const result = {
+      buttons: [],
+      inputs: [],
+      dialogs: [],
+      htmlSnapshots: []
+    };
+    
+    // Look for trace.json which contains the actions and snapshots
+    const traceEntry = entries.find(e => e.entryName === 'trace.json' || e.entryName.endsWith('trace.json'));
+    if (!traceEntry) {
+      if (HEALER_VERBOSE) console.log('📋 trace.json not found in zip');
+      return result;
+    }
+    
+    const traceContent = traceEntry.getData().toString('utf8');
+    const traceData = JSON.parse(traceContent);
+    
+    // Extract snapshots that contain DOM state
+    if (traceData.snapshots && Array.isArray(traceData.snapshots)) {
+      for (const snapshot of traceData.snapshots) {
+        if (snapshot.str && snapshot.str.length > 0) {
+          // Extract button text from HTML
+          const buttonMatches = snapshot.str.matchAll(/<button[^>]*(?:data-testid="([^"]*)")?[^>]*>([^<]*)<\/button>/gi);
+          for (const match of buttonMatches) {
+            const testId = match[1];
+            const text = match[2]?.trim();
+            if (text) {
+              result.buttons.push({
+                text,
+                testId: testId || null,
+                html: match[0]
+              });
+            }
+          }
+          
+          // Extract input fields
+          const inputMatches = snapshot.str.matchAll(/<input[^>]*(?:placeholder="([^"]*)")?(?:aria-label="([^"]*)")?[^>]*>/gi);
+          for (const match of inputMatches) {
+            const placeholder = match[1];
+            const ariaLabel = match[2];
+            result.inputs.push({
+              placeholder: placeholder || null,
+              ariaLabel: ariaLabel || null
+            });
+          }
+          
+          // Extract dialog information
+          const dialogMatches = snapshot.str.matchAll(/<(?:dialog|div[^>]*role="dialog")[^>]*>[\s\S]*?<\/(?:dialog|div)>/gi);
+          for (const match of dialogMatches) {
+            const dialogText = match[0].match(/>([^<]+)</g);
+            if (dialogText) {
+              result.dialogs.push({
+                content: dialogText.map(t => t.replace(/[><]/g, '')).join(' '),
+                fullHtml: match[0].substring(0, 500) // First 500 chars
+              });
+            }
+          }
+          
+          result.htmlSnapshots.push(snapshot.str);
+        }
+      }
+    }
+    
+    // Deduplicate buttons by text
+    result.buttons = Array.from(new Map(
+      result.buttons.map(b => [b.text, b])
+    ).values());
+    
+    if (HEALER_VERBOSE) {
+      console.log(`📋 Extracted from trace: ${result.buttons.length} buttons, ${result.inputs.length} inputs, ${result.dialogs.length} dialogs`);
+    }
+    
+    return result;
+  } catch (err) {
+    if (HEALER_VERBOSE) console.log(`⚠️  Error extracting elements from trace: ${err.message}`);
+    return {
+      buttons: [],
+      inputs: [],
+      dialogs: [],
+      htmlSnapshots: [],
+      error: err.message
+    };
+  }
+}
+
+/**
+ * Generate button text guidance from trace analysis
+ */
+function generateButtonTextGuidance(traceElements, testCode) {
+  if (!traceElements || traceElements.buttons.length === 0) {
+    return '';
+  }
+  
+  const failedButtonMatches = testCode.match(/getByRole\(['"]button['"][^)]*,\s*\{\s*name:\s*\/([^\/]*)\//gi) || [];
+  
+  let guidance = '\n### 📋 BUTTON ELEMENTS DETECTED IN PAGE TRACE:\n';
+  guidance += `**Available buttons from trace analysis:**\n`;
+  
+  traceElements.buttons.forEach((btn, idx) => {
+    guidance += `  ${idx + 1}. "${btn.text}"${btn.testId ? ` (testId: ${btn.testId})` : ''}\n`;
+  });
+  
+  if (failedButtonMatches.length > 0) {
+    guidance += `\n**Failed selector patterns in test code:**\n`;
+    failedButtonMatches.forEach(match => {
+      const pattern = match.match(/\/([^\/]*)\//)[1];
+      const hasMatch = traceElements.buttons.some(b => 
+        new RegExp(pattern, 'i').test(b.text)
+      );
+      guidance += `  - \`/^${pattern}/i\` ${hasMatch ? '✅ MATCHES' : '❌ NO MATCH'}\n`;
+    });
+  }
+  
+  guidance += `\n**Recommendation for button selectors:**
+Use these text patterns for getByRole('button', { name: /pattern/i }):
+${traceElements.buttons.map(btn => `  - /^${btn.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/i`).join('\n')}
+
+Or use data-testid if available:
+${traceElements.buttons.filter(b => b.testId).map(btn => `  - getByTestId('${btn.testId}')`).join('\n') || '  (no testIds found)'}
+`;
+  
+  return guidance;
+}
+
+/**
  * Generate comprehensive analysis prompt for Gemini with security sanitization
  */
 function generateAnalysisPrompt(testInfo, testCode) {
   // Security: Validate and sanitize all inputs
   if (detectPromptInjection(testCode)) {
     console.warn('⚠️  Warning: Potential prompt injection detected in test code. Proceeding with caution.');
+  }
+  
+  // Extract trace elements from Playwright trace file
+  let traceElements = { buttons: [], inputs: [], dialogs: [], htmlSnapshots: [] };
+  const tracePath = findTraceFileForTest(testInfo.file || 'test');
+  if (tracePath) {
+    console.log('🔍 Analyzing Playwright trace for element information...');
+    traceElements = extractElementsFromTrace(tracePath);
   }
   
   // Validate test code size
@@ -1139,7 +1554,15 @@ function generateAnalysisPrompt(testInfo, testCode) {
   // Generate intelligent selector guidance based on test intent
   const selectorGuidance = generateSelectorGuidance(testCode);
   
-  return `You are an expert Playwright test automation engineer specializing in fixing broken tests due to frontend element changes. Analyze this failing test and provide:
+  // Generate button text guidance from trace analysis
+  const buttonTextGuidance = generateButtonTextGuidance(traceElements, testCode);
+  
+  // Detect DOM architecture issues
+  const domIssues = detectDOMArchitectureIssues(sanitizedTestCode, sanitizedError);
+  const domArchitectureGuidance = generateDOMArchitectureGuidance(domIssues);
+  const isDOMError = isDOMArchitectureError(sanitizedError, sanitizedTestCode);
+  
+  return `You are an expert Playwright test automation engineer specializing in fixing broken tests due to frontend element changes AND DOM architecture issues. Analyze this failing test and provide:
 
 1. **Root Cause Analysis**: Explain why the test is failing (element not found, changed selector, etc.)
 2. **Error Classification**: Identify the type of error (timeout, assertion, selector_not_found, etc.)
@@ -1197,6 +1620,8 @@ Analysis Focus Areas:
 - Accessibility-first selectors (getByRole, getByLabel, getByPlaceholder)
 - Strict mode violations (locators matching multiple elements when expecting one)
 - Frontend version upgrade compatibility: Use selectors that survive Material-UI v5→v6→v7+ updates
+${buttonTextGuidance}
+${domArchitectureGuidance}
 
 IMPORTANT: 
 1. Always output the COMPLETE fixed code in a code block, never truncate it
@@ -1204,8 +1629,11 @@ IMPORTANT:
 3. If error indicates missing elements, the selector likely changed in frontend - suggest robust alternatives
 4. Test code should work across multiple Material-UI versions without changes
 5. When fixing, prefer this priority: getByRole > getByText > getByLabel > getByTestId > data attributes > text content
-6. NEVER suggest using .querySelector with class names for Material-UI components`;
+6. NEVER suggest using .querySelector with class names for Material-UI components
+${isDOMError ? '\n7. **DOM ARCHITECTURE ISSUE DETECTED**: This error is likely caused by Shadow DOM, iframe, or Web Component architecture. Apply the DOM Architecture fixes FIRST before selector fixes.' : ''}`;
 }
+
+
 
 /**
  * Call Gemini API with retry mechanism and timeout (Retry Mechanism + API Timeout)
@@ -1215,7 +1643,7 @@ async function analyzeWithGemini(testInfo, testCode, retryCount = 0) {
     await rateLimitAndWait();
     
     const model = genAI.getGenerativeModel({
-      model: 'gemini-2.5-flash'
+      model: 'gemini-2.5-flash-lite',
     });
 
     const prompt = generateAnalysisPrompt(testInfo, testCode);
@@ -1268,8 +1696,29 @@ function extractFixedCode(geminiResponse) {
   let match;
   
   while ((match = codeBlockPattern.exec(geminiResponse)) !== null) {
-    const code = match[1].trim();
-    if (code.includes('import') || code.includes('test(') || code.includes('expect(')) {
+    let code = match[1].trim();
+    
+    // Filter out lines that are markdown formatting or analysis text
+    const lines = code.split('\n');
+    const cleanedLines = lines.filter(line => {
+      const trimmed = line.trim();
+      // Skip markdown headers, bold text, and analysis lines
+      if (trimmed.startsWith('#') ||           // Markdown headers
+          trimmed.startsWith('**') ||          // Bold text
+          trimmed.startsWith('-') && trimmed.includes(':')) { // Bullet lists with descriptions
+        return false;
+      }
+      return true;
+    });
+    
+    code = cleanedLines.join('\n').trim();
+    if (!code) continue; // Skip if nothing left after filtering
+    
+    // Accept code with: test functions, imports, assertions, or locators
+    if (code.includes('import') || 
+        code.includes('test(') || 
+        code.includes('expect(') ||
+        code.includes('page.locator')) {  // Nested locators like page.locator('seat-grid').locator('.seat.available')
       allMatches.push(code);
     }
   }
@@ -1277,12 +1726,22 @@ function extractFixedCode(geminiResponse) {
   if (allMatches.length > 0) {
     const lastCode = allMatches[allMatches.length - 1];
     
+    // Full test functions with assertions
     if ((lastCode.includes('import') || lastCode.includes('test(')) && lastCode.includes('expect(')) {
+      return lastCode;
+    }
+    
+    // Locator-only fixes (no full test wrapper needed)
+    if (lastCode.includes('page.locator')) {
       return lastCode;
     }
     
     for (let i = allMatches.length - 1; i >= 0; i--) {
       if (allMatches[i].includes('import') && allMatches[i].includes('test(')) {
+        return allMatches[i];
+      }
+      // Return locator fixes if found
+      if (allMatches[i].includes('page.locator')) {
         return allMatches[i];
       }
     }
@@ -1363,18 +1822,30 @@ function applyFixes(filePath, fixedCode) {
     const hasTest = fixedCode.includes('test(');
     const hasExpect = fixedCode.includes('expect(');
     const hasClosingBrace = fixedCode.includes('});');
-
-    if (!hasImport) console.warn('⚠️  Warning: Fixed code missing import statement');
-    if (!hasTest) {
+    const hasLocator = fixedCode.includes('page.locator') || fixedCode.includes('.locator(');
+    
+    // Determine if this is a partial fix (just a locator change) or full test
+    const isPartialFix = hasLocator && !hasTest;
+    
+    if (!hasImport && !isPartialFix) console.warn('⚠️  Warning: Fixed code missing import statement');
+    if (!hasTest && !isPartialFix) {
       console.error('❌ Error: Fixed code missing test() function - invalid Playwright test');
       return { success: false, backupPath: null, error: 'No test function' };
     }
-    if (!hasExpect) console.warn('⚠️  Warning: Fixed code has no expect() assertions');
-    if (!hasClosingBrace) console.warn('⚠️  Warning: Fixed code may be incomplete (missing closing braces)');
+    if (!hasExpect && !isPartialFix) console.warn('⚠️  Warning: Fixed code has no expect() assertions');
+    if (!hasClosingBrace && !isPartialFix) console.warn('⚠️  Warning: Fixed code may be incomplete (missing closing braces)');
 
-    if (fixedCode.includes('### ') || (fixedCode.includes('**') && fixedCode.includes('**'))) {
-      console.error('❌ Error: Fixed code appears to contain markdown formatting - likely analysis text, not code');
-      return { success: false, backupPath: null, error: 'Markdown detected' };
+    // Check if code is mostly markdown (many lines start with # or >> indicating level headers)
+    const lines = fixedCode.split('\n');
+    const markdownLines = lines.filter(line => {
+      const trimmed = line.trim();
+      return trimmed.startsWith('#') || trimmed.startsWith('**') && trimmed.endsWith('**');
+    }).length;
+    
+    const markdownRatio = lines.length > 0 ? markdownLines / lines.length : 0;
+    if (markdownRatio > 0.5) {
+      console.error('❌ Error: Fixed code appears to be mostly markdown formatting - likely analysis text, not code');
+      return { success: false, backupPath: null, error: 'Mostly markdown' };
     }
 
     const codeValidation = validateGeneratedCode(fixedCode);
@@ -1395,7 +1866,52 @@ function applyFixes(filePath, fixedCode) {
       return { success: false, backupPath: backupPath, error: 'Symbolic link' };
     }
 
-    const writeSuccess = atomicFileWrite(validatedPath, fixedCode);
+    let writeSuccess;
+    if (isPartialFix) {
+      // For partial fixes (just locator changes), do a surgical replacement
+      const originalContent = fs.readFileSync(validatedPath, 'utf-8');
+      const lines = originalContent.split('\n');
+      
+      // Extract the variable name and pattern to find from the fixed code
+      // e.g., "const seatButtons = page.locator('seat-grid').locator('.seat.available');"
+      const varMatch = fixedCode.match(/const\s+(\w+)\s*=/);
+      if (varMatch) {
+        const varName = varMatch[1];
+        // Find the line that declares this variable in the original file
+        const lineIndex = lines.findIndex(line => line.includes(`const ${varName}`));
+        if (lineIndex >= 0) {
+          // Replace that line with the fixed code
+          lines[lineIndex] = fixedCode.trim();
+          const modifiedContent = lines.join('\n');
+          writeSuccess = atomicFileWrite(validatedPath, modifiedContent);
+          console.log(`✅ Partial fix applied: Updated locator for '${varName}'`);
+        } else {
+          console.warn(`⚠️  Could not find variable '${varName}' in original file, writing full replacement`);
+          writeSuccess = atomicFileWrite(validatedPath, fixedCode);
+        }
+      } else {
+        // If we can't parse it as a const declaration, try to find and replace page.locator calls
+        const locatorMatches = fixedCode.match(/page\.locator\([^)]+\)\.locator\([^)]+\)/g);
+        if (locatorMatches && locatorMatches.length > 0) {
+          let modifiedContent = originalContent;
+          locatorMatches.forEach(locatorFix => {
+            // Simple replacement of locator patterns
+            modifiedContent = modifiedContent.replace(
+              /page\.locator\([^)]+\)/,
+              locatorFix
+            );
+          });
+          writeSuccess = atomicFileWrite(validatedPath, modifiedContent);
+          console.log('✅ Partial fix applied: Updated locator selectors');
+        } else {
+          writeSuccess = atomicFileWrite(validatedPath, fixedCode);
+        }
+      }
+    } else {
+      // For full test functions, replace the entire content
+      writeSuccess = atomicFileWrite(validatedPath, fixedCode);
+    }
+    
     if (!writeSuccess) {
       console.error('❌ Failed to write file');
       return { success: false, backupPath: backupPath, error: 'Write failed' };
@@ -1472,7 +1988,7 @@ function verifyFix(testFile) {
         `tests/${testFileName}`,
         '--reporter=list',
         '--reporter=json',
-        '--reporter-output=playwright-report/verify-results.json'
+        '--reporter-output=reports/playwright/verify-results.json'
       ], {
         encoding: 'utf8',
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -1730,18 +2246,35 @@ async function heal() {
     };
 
     // Check if should heal
-    if (!shouldHealTest(test)) {
+    const testCode = readTestFile(test.filePath);
+    if (!testCode) {
+      testResult.failureReason = 'Could not read test file';
+      healingResults.tests.push(testResult);
+      continue;
+    }
+    
+    if (!shouldHealTest(test, testCode)) {
       console.log('⏭️  Skipping: Test error indicates infrastructure/configuration issue');
       testResult.failureReason = 'Infrastructure/Configuration error';
       healingResults.tests.push(testResult);
       continue;
     }
 
-    const testCode = readTestFile(test.filePath);
-    if (!testCode) {
-      testResult.failureReason = 'Could not read test file';
-      healingResults.tests.push(testResult);
-      continue;
+    // Detect DOM architecture issues
+    const domIssues = detectDOMArchitectureIssues(testCode, test.error);
+    if (domIssues.hasShadowDOM || domIssues.hasIframes || domIssues.hasWebComponents) {
+      console.log('🏗️  DOM Architecture Issue Detected:');
+      if (domIssues.hasShadowDOM) console.log('   - Shadow DOM elements detected');
+      if (domIssues.hasWebComponents) console.log('   - Web Components detected');
+      if (domIssues.hasIframes) console.log('   - Iframes detected');
+      if (domIssues.potentialArchitectureIssues.length > 0) {
+        console.log('   Issues: ' + domIssues.potentialArchitectureIssues.join(', '));
+      }
+      logHealingEvent('dom_architecture_detected', test.title, 'Shadow DOM / Web Components', 'Gemini will provide architectural fixes', {
+        hasShadowDOM: domIssues.hasShadowDOM,
+        hasWebComponents: domIssues.hasWebComponents,
+        hasIframes: domIssues.hasIframes
+      });
     }
 
     if (options.verbose) {

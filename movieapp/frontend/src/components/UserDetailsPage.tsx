@@ -411,7 +411,7 @@ const UserDetailsPage: React.FC = () => {
             variant="contained"
             color="primary"
           >
-            Fix Errors
+            close
           </Button>
         </DialogActions>
       </Dialog>

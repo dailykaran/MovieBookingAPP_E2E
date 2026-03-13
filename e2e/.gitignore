@@ -3,20 +3,15 @@
 .env.local
 .env.*.local
 
-
-# Playwright
+# Playwright & Healer reports (all centralized in reports/)
 node_modules/
-/test-results/
-/playwright-report/
+/reports/
 /blob-report/
 /playwright/.cache/
 /playwright/.auth/
-/.healer-audit.log/
-/.healer-snapshots/
-/.healer-videos/
-/.healer-traces/
-/.healer-backups/
-.healer-audit.log
 /dist/
+/test-results/
+/playwright-report/
+
 
 

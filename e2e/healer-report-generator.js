@@ -23,6 +23,20 @@ function escapeHtmlNode(text) {
 }
 
 /**
+ * Remove ANSI escape codes from text
+ */
+function stripAnsiCodes(text) {
+  if (!text) return '';
+  // Remove ANSI escape sequences: ESC[...m or ESC[...H, etc.
+  return text
+    .replace(/\x1b\[[0-9;]*m/g, '')      // Color codes: [31m, [39m, etc.
+    .replace(/\x1b\[[0-9;]*H/g, '')      // Cursor position: [2J, etc.
+    .replace(/\x1b\[[0-9;]*[A-Z]/g, '')  // Other escape sequences
+    .replace(/\[\d+m/g, '')               // Fallback for [31m style codes
+    .replace(/\[\d+[A-Z]/g, '');          // Fallback for cursor codes
+}
+
+/**
  * Format code with line numbers - simplified and truncated
  */
 function formatCodeWithLineNumbers(code, type = 'error', maxLines = 8) {
@@ -46,11 +60,8 @@ function formatCodeWithLineNumbers(code, type = 'error', maxLines = 8) {
         .replace(/\b(timeout|Timeout|TIMEOUT|failed|Failed)\b/g, '<span class="error-warn">$1</span>')
         .replace(/\b(at|in|near)\b/g, '<span class="error-prep">$1</span>');
     } else if (type === 'fix') {
-      highlighted = escapedLine
-        .replace(/\b(test|it|describe|expect|async|await)\b/g, '<span class="fix-keyword">$1</span>')
-        .replace(/\b(page\.|locator|click|fill|type|goto|navigate|waitFor)\b/g, '<span class="fix-action">$1</span>')
-        .replace(/\b(const|let|var|function|return|if|else|for|while)\b/g, '<span class="fix-syntax">$1</span>')
-        .replace(/('.*?'|".*?"|`.*?`)/g, '<span class="fix-string">$1</span>');
+      // For fix type, display plain code without syntax highlighting
+      highlighted = escapedLine;
     }
     
     return `<div class="code-line"><span class="line-num">${paddedNum}</span><span class="code-text">${highlighted}</span></div>`;
@@ -67,7 +78,7 @@ function formatCodeWithLineNumbers(code, type = 'error', maxLines = 8) {
  * Load healing logs from JSON file
  */
 function loadHealingLogs() {
-  const logsPath = path.join(process.cwd(), 'test-results', 'healing-logs.json');
+  const logsPath = path.join(process.cwd(), 'reports/results', 'healing-logs.json');
   try {
     if (fs.existsSync(logsPath)) {
       const logsData = fs.readFileSync(logsPath, 'utf8');
@@ -137,7 +148,7 @@ function extractErrorPatterns(tests) {
  * Generate HTML report for healer session
  */
 function generateHtmlReport(healingResults) {
-  const reportDir = path.join(process.cwd(), 'test-results');
+  const reportDir = path.join(process.cwd(), 'reports/healer');
   
   // Ensure directory exists
   if (!fs.existsSync(reportDir)) {
@@ -414,8 +425,6 @@ function generateHtmlReport(healingResults) {
             min-height: 150px;
             overflow: auto;
             resize: both;
-            word-break: break-word;
-            white-space: pre-wrap;
             background: #f9fafb;
         }
 
@@ -447,15 +456,17 @@ function generateHtmlReport(healingResults) {
             max-height: 500px;
             overflow-y: auto;
             overflow-x: auto;
-            white-space: pre-wrap;
-            word-wrap: break-word;
-            word-break: break-word;
             resize: both;
         }
 
         .error-text {
             background: var(--bg-error);
             border-color: var(--border-error);
+        }
+
+        .analysis-text {
+            background: #f0f9ff;
+            border-color: #bae6fd;
         }
 
         .fix-text {
@@ -770,6 +781,10 @@ function generateHtmlReport(healingResults) {
             border-bottom: 1px solid var(--grey-border);
             font-size: 0.95em;
             line-height: 1.6;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            word-break: break-word;
+            color: var(--text-primary);
         }
 
         .test-item-line:last-child {
@@ -778,10 +793,13 @@ function generateHtmlReport(healingResults) {
 
         .code-line {
             display: flex;
-            padding: 2px 0;
+            padding: 6px 0;
             border-left: 3px solid transparent;
             margin: 0;
             align-items: flex-start;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            word-break: break-all;
         }
 
         .error-text .code-line {
@@ -792,25 +810,32 @@ function generateHtmlReport(healingResults) {
             border-left-color: #6ee7b7;
         }
 
+        .analysis-text .test-item-line {
+            white-space: normal;
+            word-break: break-word;
+        }
+
         .line-num {
             color: var(--grey);
             display: inline-block;
-            min-width: 40px;
+            min-width: 45px;
             text-align: right;
-            margin-right: 12px;
+            margin-right: 15px;
             font-size: 0.85em;
             flex-shrink: 0;
             font-weight: 500;
             font-family: 'Courier New', 'Monaco', 'Menlo', monospace;
             user-select: none;
+            padding: 0 5px;
         }
 
         .code-text {
             flex: 1;
             white-space: pre-wrap;
             word-wrap: break-word;
-            word-break: break-word;
+            word-break: break-all;
             font-family: 'Courier New', 'Monaco', 'Menlo', monospace;
+            overflow-wrap: break-word;
         }
 
         .code-truncated {
@@ -1134,8 +1159,8 @@ function generateHtmlReport(healingResults) {
                                         const statusClass = test.verified ? 'success' : 'failed';
                                         const statusText = test.verified ? '✅ FIXED & VERIFIED' : test.fixed ? '⚠️ FIXED (UNVERIFIED)' : '❌ NOT FIXED';
                                         const statusBadgeClass = test.verified ? 'success' : test.fixed ? 'warning' : 'failed';
-                                        const errorPreview = test.error || 'No error details available';
-                                        const analysisPreview = test.analysis || 'No analysis available';
+                                        const errorPreview = stripAnsiCodes(test.error || 'No error details available');
+                                        const analysisPreview = stripAnsiCodes(test.analysis || 'No analysis available');
 
                                         return `
                                             <div class="test-result ${statusClass}" data-test-id="${testIdx}">
@@ -1167,10 +1192,14 @@ function generateHtmlReport(healingResults) {
                                                             <span><span class="subsection-icon">▶</span>🤖 AI Analysis</span>
                                                         </div>
                                                         <div class="subsection-content">
-                                                            <div style="padding: 10px; border-radius: 4px;">
-                                                                ${escapeHtmlNode(analysisPreview).split('\n').map(line => 
-                                                                    line.trim() ? '<div class="test-item-line">• ' + line + '</div>' : ''
-                                                                ).join('')}
+                                                            <div class="error-text" style="background: #f0f9ff; border-color: #bae6fd;">
+                                                                ${analysisPreview.split('\n').map(line => {
+                                                                    const trimmed = line.trim();
+                                                                    if (!trimmed) return '';
+                                                                    // Remove leading bullet points and asterisks
+                                                                    const cleaned = trimmed.replace(/^[\s•*\-]\s*/, '');
+                                                                    return '<div class="test-item-line">' + escapeHtmlNode(cleaned) + '</div>';
+                                                                }).join('')}
                                                             </div>
                                                         </div>
                                                     </div>
@@ -1182,7 +1211,7 @@ function generateHtmlReport(healingResults) {
                                                             <span><span class="subsection-icon">▶</span>✅ ${test.fixed ? 'Applied' : 'Suggested'} Fix</span>
                                                         </div>
                                                         <div class="subsection-content">
-                                                            <div class="fix-text">${formatCodeWithLineNumbers(test.fixedCode, 'fix', 100)}</div>
+                                                            <div class="fix-text">${formatCodeWithLineNumbers(stripAnsiCodes(test.fixedCode), 'fix', 100)}</div>
                                                         </div>
                                                     </div>
                                                     ` : ''}
@@ -1276,7 +1305,80 @@ function generateHtmlReport(healingResults) {
   fs.writeFileSync(reportPath, htmlContent, 'utf8');
   
   console.log(`\n📊 HTML Report generated: ${reportPath}`);
+  
+  // Generate index.html listing all reports
+  generateReportIndex(reportDir);
+  
   return reportPath;
+}
+
+/**
+ * Generate an index.html file listing all available healer reports
+ */
+function generateReportIndex(reportDir) {
+  try {
+    const files = fs.readdirSync(reportDir)
+      .filter(f => f.match(/^healer-report-.*\.html$/))
+      .map(f => ({
+        name: f,
+        time: fs.statSync(path.join(reportDir, f)).mtimeMs
+      }))
+      .sort((a, b) => b.time - a.time);
+    
+    const reportList = files.map(f => {
+      const date = new Date(f.time).toLocaleString();
+      return `<tr>
+        <td><a href="${f.name}" target="_blank">${f.name}</a></td>
+        <td>${date}</td>
+      </tr>`;
+    }).join('\n');
+    
+    const indexContent = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Healer Reports - Index</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; padding: 40px 20px; }
+    .container { max-width: 900px; margin: 0 auto; }
+    h1 { color: white; margin-bottom: 30px; text-align: center; }
+    table { background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 10px 40px rgba(0,0,0,0.2); width: 100%; }
+    th, td { padding: 15px; text-align: left; border-bottom: 1px solid #eef2f5; }
+    th { background: #f7f9fc; font-weight: 600; color: #333; }
+    tr:hover { background: #f7f9fc; }
+    a { color: #667eea; text-decoration: none; font-weight: 500; }
+    a:hover { text-decoration: underline; }
+    .no-reports { color: white; text-align: center; padding: 50px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>📊 Healer Reports</h1>
+    ${files.length > 0 ? `
+    <table>
+      <thead>
+        <tr>
+          <th>Report</th>
+          <th>Generated</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${reportList}
+      </tbody>
+    </table>
+    ` : '<div class="no-reports"><h2>No reports available yet</h2></div>'}
+  </div>
+</body>
+</html>`;
+    
+    const indexPath = path.join(reportDir, 'index.html');
+    fs.writeFileSync(indexPath, indexContent, 'utf8');
+    console.log(`📑 Report index updated: ${indexPath}`);
+  } catch (err) {
+    console.warn(`⚠️  Could not generate report index: ${err.message}`);
+  }
 }
 
 export { generateHtmlReport, escapeHtmlNode, loadHealingLogs, extractLocatorChanges, extractErrorPatterns };
