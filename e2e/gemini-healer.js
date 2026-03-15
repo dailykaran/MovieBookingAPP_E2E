@@ -47,8 +47,49 @@ const BACKUP_RETENTION_DAYS = parseInt(process.env.BACKUP_RETENTION_DAYS || '7',
 const MAX_BACKUPS_PER_FILE = parseInt(process.env.MAX_BACKUPS_PER_FILE || '5', 10);
 const ALLOWED_TEST_PATTERNS = [/^[a-zA-Z0-9._\-/]+\.spec\.ts(x)?$/, /^[a-zA-Z0-9._\-/]+\.test\.ts(x)?$/];
 const DANGEROUS_PATTERNS = [/fs\.(rm|unlink|rmdir)/, /execSync|execFile|spawn/, /require\(|import\(/, /eval\(/, /new Function/, /process\.exit/, /child_process/];
-const SKIP_HEALING_KEYWORDS = ['network error', 'infrastructure', 'configuration error', 'env setup', 'not installed', 'connection refused', 'connection reset', 'enotfound', 'econnrefused', 'err_connection_refused', 'err_connection_reset', 'port', 'server', 'host not found', 'dns', 'certificate', 'ssl', 'https', 'eaddrinuse'];
+
+// CRITICAL FIX: Only TRUE infrastructure errors that CANNOT be fixed by test changes
+const INFRASTRUCTURE_ERRORS = [
+  'connection refused', 'connection reset', 'enotfound', 'econnrefused',
+  'host not found', 'dns', 'getaddrinfo', 'econnreset',
+  'target page, context or browser has been closed', 'browser context was closed',
+  'websocket closed', 'target closed', 'session not created',
+  'err_name_not_resolved', 'err_connection_refused', 'err_connection_reset',
+  'err_network_changed', 'timeout waiting for connection',
+  'socket hang up', 'socket error', 'epipe', 'enotfound'
+];
+
 const REQUIRED_PACKAGES = ['@google/generative-ai', '@playwright/test', 'dotenv'];
+
+// ============ SOURCE CODE ANALYSIS CONFIGURATION ============
+const HEALER_SOURCE_CODE_ANALYSIS = process.env.HEALER_SOURCE_CODE_ANALYSIS === 'true';
+const HEALER_SOURCE_CODE_WHITELIST = process.env.HEALER_SOURCE_CODE_WHITELIST || 'movieapp/frontend/src/components/**';
+const HEALER_SOURCE_CODE_MAX_FILE_SIZE = parseInt(process.env.HEALER_SOURCE_CODE_MAX_FILE_SIZE || '500000', 10); // 500KB
+const HEALER_SOURCE_CODE_MAX_EXTRACTION_SIZE = parseInt(process.env.HEALER_SOURCE_CODE_MAX_EXTRACTION_SIZE || '2097152', 10); // 2MB
+const MAX_SOURCE_CODE_FILES_PER_SESSION = parseInt(process.env.MAX_SOURCE_CODE_FILES_PER_SESSION || '20', 10);
+const SOURCE_CODE_ACCESS_AUDIT_LOG = path.join(process.cwd(), 'logs/source-code-access-audit.json');
+let sessionSourceCodeExtraction = 0; // Track total bytes extracted in session
+let sessionSourceCodeFiles = []; // Track files accessed in session
+
+// Regex patterns for extracting UI elements (safe patterns with bounds)
+// IMPROVED: Handle JSX formatting with whitespace, newlines, and various quote styles
+const UI_ELEMENT_PATTERNS = {
+  // Match label={"..."} or label='...' with flexible whitespace
+  reactLabels: /label\s*=\s*(?:{["']|["'])([^"'}{]+)(?:["']|})/g,
+  // Also try simpler patterns without braces
+  reactLabels2: /label\s*=\s*["']([^"']+)["']/g,
+  // Match getByLabel, getByPlaceholder patterns in test code (string literals)
+  testLookupLabels: /getByLabel\s*\(\s*["']([^"']+)["']\s*\)/g,
+  // NEW: Match getByLabel, getByText, getByPlaceholder with regex patterns (/.../)
+  testLookupLabelsRegex: /getByLabel\s*\(\s*\/([^/]+)\/[igm]*\s*\)/g,
+  testLookupTextRegex: /getByText\s*\(\s*\/([^/]+)\/[igm]*\s*\)/g,
+  testLookupPlaceholderRegex: /getByPlaceholder\s*\(\s*\/([^/]+)\/[igm]*\s*\)/g,
+  reactButtons: /(?:name|aria-label)\s*=\s*["']([^"']{1,500})["']/g,
+  reactPlaceholder: /placeholder\s*=\s*["']([^"']{1,500})["']/g,
+  headings: /<Typography[^>]*variant\s*=\s*["']h[1-6]["'][^>]*>([^<]{1,200})</g,
+  webComponentLabel: /this\.label\s*=\s*["']([^"']{1,500})["']/g,
+  webComponentValue: /this\.value\s*=\s*["']([^"']{1,500})["']/g
+};
 
 // Track API call rate for rate limiting
 let apiCallTimes = [];
@@ -64,7 +105,28 @@ let healingLogs = {
     totalEvents: 0,
     failedLocators: 0,
     workedLocators: 0,
-    elementsHealed: 0
+    elementsHealed: 0,
+    // NEW FIELDS FOR BEHAVIORAL TRACKING
+    behavioralChangesDetected: 0,
+    frontendBugsDetected: 0,
+    selectorUpdates: 0,
+    textUpdates: 0,
+    urlUpdates: 0,
+    architecturalFixes: 0,
+    decisionBreakdown: {
+      FRONTEND_BUG: 0,
+      UPDATE_TEST: 0,
+      UPDATE_SELECTOR: 0,
+      UPDATE_TEXT: 0,
+      ARCHITECTURAL_FIX: 0,
+      MANUAL_REVIEW: 0,
+      UNKNOWN: 0
+    },
+    confidenceDistribution: {
+      high: 0,
+      medium: 0,
+      low: 0
+    }
   }
 };
 
@@ -101,6 +163,33 @@ function logHealingEvent(eventType, elementName, failedLocator, workingLocator, 
 
   if (eventType === 'element_healed') {
     healingLogs.statistics.elementsHealed++;
+  }
+
+  // NEW: Track behavioral changes and decisions
+  if (eventType === 'behavioral_change_detected') {
+    healingLogs.statistics.behavioralChangesDetected++;
+  }
+  
+  if (eventType === 'frontend_bug_detected') {
+    healingLogs.statistics.frontendBugsDetected++;
+  }
+  
+  if (eventType === 'healer_decision') {
+    const decision = details.decision || 'UNKNOWN';
+    healingLogs.statistics.decisionBreakdown[decision] = (healingLogs.statistics.decisionBreakdown[decision] || 0) + 1;
+    
+    const confidence = details.confidence || 0;
+    if (confidence >= 70) healingLogs.statistics.confidenceDistribution.high++;
+    else if (confidence >= 40) healingLogs.statistics.confidenceDistribution.medium++;
+    else healingLogs.statistics.confidenceDistribution.low++;
+  }
+  
+  if (eventType === 'test_fixed_with_change') {
+    const changeType = details.changeType || 'unknown';
+    if (changeType === 'selector') healingLogs.statistics.selectorUpdates++;
+    if (changeType === 'text') healingLogs.statistics.textUpdates++;
+    if (changeType === 'url') healingLogs.statistics.urlUpdates++;
+    if (changeType === 'architectural') healingLogs.statistics.architecturalFixes++;
   }
 
   if (HEALER_VERBOSE) {
@@ -555,30 +644,37 @@ function atomicFileWrite(filePath, content) {
 }
 
 /**
- * Check if test should be healed based on error type (Conditional Healing)
- /**
- * Determine if test should be healed (skip infrastructure errors, but allow DOM architecture issues)
+ * CRITICAL FIX: Determine if test should be healed based on error classification
+ * Only skip TRUE infrastructure/connection errors - heal everything else including assertion timeouts
  */
 function shouldHealTest(testInfo, testCode = '') {
+  const classifiedType = testInfo.classifiedType || 'UNKNOWN';
   const lowerError = testInfo.error.toLowerCase();
   
-  // Check if this is a DOM architecture issue - these ARE fixable
-  const isDOMIssue = isDOMArchitectureError(testInfo.error, testCode);
-  
-  // Skip infrastructure/network errors, but heal DOM architecture issues
-  for (const keyword of SKIP_HEALING_KEYWORDS) {
-    if (lowerError.includes(keyword)) {
-      // Allow healing of DOM architecture issues even if they match certain keywords
-      if (isDOMIssue && (keyword === 'timeout' || !keyword.includes('network'))) {
-        console.log(`✅ Allowing heal for DOM architecture issue (timeout on Shadow DOM element)`);
-        return true;
-      }
-      return false;
+  // ONLY skip TRUE infrastructure errors (connection/network issues that CAN'T be fixed by test changes)
+  if (classifiedType === 'INFRASTRUCTURE') {
+    if (HEALER_VERBOSE) {
+      console.log(`  ⏭️  Skipping: True infrastructure/connection error (not fixable by test changes)`);
     }
+    return false;
   }
   
-  if (testInfo.errorType === 'unknown') {
-    return false;
+  // ✅ HEAL ALL OTHER ERROR TYPES:
+  // - ASSERTION: toHaveURL, element not found, text mismatches (fixable by updating test logic)
+  // - SELECTOR: Strict mode violations, ambiguous locators (fixable by updating selectors)
+  // - NAVIGATION: URL changes, routing issues (fixable by updating expected URLs)
+  // - DOM_ARCHITECTURE: Shadow DOM, iframes, Web Components (fixable by using penetrating selectors)
+  // - TIMEOUT_ASSERTION: Assertion timeouts on elements (fixable by updating selectors/logic)
+  if (['ASSERTION', 'SELECTOR', 'NAVIGATION', 'DOM_ARCHITECTURE', 'TIMEOUT_ASSERTION'].includes(classifiedType)) {
+    return true;
+  }
+  
+  // For UNKNOWN errors, attempt to heal them (better to try and fail than skip)
+  if (classifiedType === 'UNKNOWN') {
+    if (HEALER_VERBOSE) {
+      console.log(`  🔍 Unknown error type, attempting to heal...`);
+    }
+    return true;
   }
   
   return true;
@@ -807,6 +903,30 @@ function validateTestResultsSchema(results) {
 }
 
 /**
+ * Recursively collect all specs from nested suite structure
+ */
+function collectSpecsFromSuite(suite, fileReference) {
+  const allSpecs = [];
+  
+  // Add specs from current level
+  if (suite.specs && Array.isArray(suite.specs)) {
+    suite.specs.forEach(spec => {
+      allSpecs.push({ spec, file: suite.file || fileReference });
+    });
+  }
+  
+  // Recursively add specs from nested suites
+  if (suite.suites && Array.isArray(suite.suites)) {
+    suite.suites.forEach(nestedSuite => {
+      const nestedSpecs = collectSpecsFromSuite(nestedSuite, fileReference);
+      allSpecs.push(...nestedSpecs);
+    });
+  }
+  
+  return allSpecs;
+}
+
+/**
  * Fetch and parse test results
  */
 function getFailedTests() {
@@ -830,18 +950,21 @@ function getFailedTests() {
 
     if (results.suites && Array.isArray(results.suites)) {
       for (const suite of results.suites) {
-        if (!suite.specs || !Array.isArray(suite.specs)) continue;
+        if (!suite.file) continue;
         
         if (!validateTestFileName(suite.file)) {
           console.warn(`⚠️  Skipping suspicious test file: ${suite.file}`);
           continue;
         }
 
-        for (const spec of suite.specs) {
+        // Recursively collect specs from main level and nested suites
+        const allSpecs = collectSpecsFromSuite(suite, suite.file);
+        
+        for (const { spec, file } of allSpecs) {
           if (spec.ok === false) {
             const testInfo = extractTestInfo(spec);
             
-            const safeFilePath = path.join(process.cwd(), 'tests', path.basename(suite.file));
+            const safeFilePath = path.join(process.cwd(), 'tests', path.basename(file));
             const validatedPath = validateFilePath(safeFilePath);
             
             if (!validatedPath) {
@@ -850,7 +973,7 @@ function getFailedTests() {
             }
             
             failedTests.push({
-              file: suite.file,
+              file: file,
               filePath: validatedPath,
               title: spec.title,
               status: 'failed',
@@ -871,7 +994,7 @@ function getFailedTests() {
 }
 
 /**
- * Extract detailed test information from test spec
+ * Extract detailed test information from test spec with PROPER error classification
  */
 function extractTestInfo(spec) {
   let error = 'Test failed';
@@ -906,7 +1029,78 @@ function extractTestInfo(spec) {
     }
   }
 
-  return { error, errorType, errorContext };
+  // NEW: Classify error type using intelligent detection (CRITICAL FIX)
+  const classifiedType = classifyErrorType(error);
+
+  return { error, errorType, classifiedType, errorContext };
+}
+
+/**
+ * CRITICAL FIX: Classify error type to determine if it can be healed
+ * Returns: INFRASTRUCTURE, ASSERTION, SELECTOR, NAVIGATION, DOM_ARCHITECTURE, TIMEOUT_ASSERTION, or UNKNOWN
+ */
+function classifyErrorType(errorMessage) {
+  if (!errorMessage) return 'UNKNOWN';
+  
+  const lower = errorMessage.toLowerCase();
+  
+  // Check for TRUE infrastructure/connection errors (CANNOT be fixed by test changes)
+  for (const infError of INFRASTRUCTURE_ERRORS) {
+    if (lower.includes(infError)) {
+      return 'INFRASTRUCTURE';
+    }
+  }
+  
+  // Check for DOM architecture issues (CAN be fixed by using penetrating selectors)
+  if (lower.includes('shadow dom') || lower.includes('shadow root') ||
+      lower.includes('iframe') || lower.includes('frame') ||
+      lower.includes('web component') || lower.includes('open') && lower.includes('pierce')) {
+    return 'DOM_ARCHITECTURE';
+  }
+  
+  // Check for selector/locator issues (CAN be fixed by updating selectors)
+  if (lower.includes('strict mode') || lower.includes('resolved to') ||
+      lower.includes('multiple elements') || lower.includes('ambiguous') ||
+      lower.includes('selector') || lower.includes('locator')) {
+    return 'SELECTOR';
+  }
+  
+  // Check for assertion/navigation errors on URLs (CAN be fixed by updating expected URLs)
+  if ((lower.includes('expect') || lower.includes('toHave')) && 
+      (lower.includes('url') || lower.includes('href') || lower.includes('location'))) {
+    return 'NAVIGATION';
+  }
+  
+  // Check for general assertion errors (CAN be fixed by updating test expectations)
+  if (lower.includes('expect(') || lower.includes('toHave') || 
+      lower.includes('assertion') && !lower.includes('timeout')) {
+    return 'ASSERTION';
+  }
+  
+  // CRITICAL: Distinguish timeout types
+  if (lower.includes('timeout')) {
+    // Check if it's a connection/infrastructure timeout (CANNOT be healed)
+    if (lower.includes('waiting for') && lower.includes('connection')) {
+      return 'INFRASTRUCTURE';
+    }
+    if (lower.includes('waiting for') && (lower.includes('server') || lower.includes('port'))) {
+      return 'INFRASTRUCTURE';
+    }
+    if (lower.includes('browser') && lower.includes('closed')) {
+      return 'INFRASTRUCTURE';
+    }
+    
+    // Otherwise it's an element/assertion timeout (CAN be healed by fixing selectors/timing)
+    return 'TIMEOUT_ASSERTION';
+  }
+  
+  // Check for element not found (CAN be fixed by updating selectors)
+  if (lower.includes('not found') || lower.includes('did not resolve')) {
+    return 'SELECTOR';
+  }
+  
+  // Default: allow healing for unknown errors
+  return 'UNKNOWN';
 }
 
 /**
@@ -1088,20 +1282,24 @@ function analyzeTestIntentAndSelectors(testCode) {
     }
   });
 
-  // Extract current selectors
+  // Extract current selectors (including regex patterns)
   const selectorPatterns = [
     /page\.locator\(['"](.*?)['"]\)/g,
     /getByRole\(['"]([\w]+)['"][^)]*,\s*\{\s*name:\s*['"](.*?)['"]\s*\}/g,
     /getByText\(['"](.*?)['"]\)/g,
     /getByLabel\(['"](.*?)['"]\)/g,
     /getByTestId\(['"](.*?)['"]\)/g,
-    /getByPlaceholder\(['"](.*?)['"]\)/g
+    /getByPlaceholder\(['"](.*?)['"]\)/g,
+    // NEW: Extract regex patterns from getByLabel, getByText
+    /getByLabel\s*\(\s*\/([^/]+)\/[igm]*\s*\)/g,  // Matches getByLabel(/First Name/i)
+    /getByText\s*\(\s*\/([^/]+)\/[igm]*\s*\)/g,   // Matches getByText(/some text/i)
+    /getByPlaceholder\s*\(\s*\/([^/]+)\/[igm]*\s*\)/g  // Matches getByPlaceholder(/placeholder/i)
   ];
 
   selectorPatterns.forEach(pattern => {
     let match;
     while ((match = pattern.exec(testCode)) !== null) {
-      const selector = match[1];
+      const selector = match[1] || match[2];  // Handle different capture group positions
       if (selector && !analysis.currentSelectors.includes(selector)) {
         analysis.currentSelectors.push(selector);
       }
@@ -1523,12 +1721,564 @@ ${traceElements.buttons.filter(b => b.testId).map(btn => `  - getByTestId('${btn
 }
 
 /**
+ * ==================== NEW: FRONTEND CHANGE DETECTION ====================
+ * Detect behavioral and structural changes in frontend
+ */
+function detectFrontendChanges(testInfo, testCode) {
+  const changeAnalysis = {
+    urlChange: null,
+    selectorChanges: [],
+    textChanges: [],
+    labelChanges: [],
+    structuralChanges: [],
+    detectionConfidence: 0
+  };
+
+  // 1. URL CHANGE DETECTION
+  const urlPattern = /Expected:\s*"(.*?)"\s*Received:\s*"(.*?)"/i;
+  const urlMatch = testInfo.error.match(urlPattern);
+  if (urlMatch) {
+    try {
+      const expected = new URL(urlMatch[1]);
+      const received = new URL(urlMatch[2]);
+      const expectedPath = expected.pathname;
+      const receivedPath = received.pathname;
+      
+      changeAnalysis.urlChange = {
+        expectedPath,
+        receivedPath,
+        isTargeted: receivedPath !== '/' && receivedPath.length > 1,
+        isFrontendBug: receivedPath === '/' || receivedPath === '',
+        confidence: 'high'
+      };
+    } catch (e) {
+      // URL parsing failed, not a URL change
+    }
+  }
+
+  // 2. SELECTOR CHANGE DETECTION (0 matching elements)
+  if (/Locator\.locator|0 matching elements|did not find/i.test(testInfo.error)) {
+    changeAnalysis.selectorChanges.push({
+      type: 'element_not_found',
+      likely_cause: 'Selector outdated or element removed',
+      confidence: 'high'
+    });
+  }
+
+  // 3. TEXT/ASSERTION MISMATCH
+  const textMismatchPattern = /Expected.*text.*"(.*?)"\s*Received.*"(.*?)"|AssertionError.*text|expected.*text/i;
+  if (textMismatchPattern.test(testInfo.error)) {
+    changeAnalysis.textChanges.push({
+      type: 'text_content_changed',
+      likely_cause: 'Button/label text updated in frontend',
+      confidence: 'high'
+    });
+  }
+
+  // 4. LABEL/PLACEHOLDER CHANGE
+  if (/label|placeholder|getByLabel|getByPlaceholder/i.test(testCode) && 
+      (/not found|0 matching/i.test(testInfo.error))) {
+    changeAnalysis.labelChanges.push({
+      type: 'label_content_changed',
+      likely_cause: 'Form label or placeholder text updated',
+      confidence: 'medium'
+    });
+  }
+
+  // 5. STRUCTURAL/DOM CHANGES
+  if (/TypeError|Cannot read property|Cannot find element|Shadow DOM|iframe/i.test(testInfo.error)) {
+    changeAnalysis.structuralChanges.push({
+      type: 'dom_structure_changed',
+      likely_cause: 'Component structure, Shadow DOM, or Architecture changed',
+      confidence: 'medium'
+    });
+  }
+
+  // Calculate overall confidence
+  const changeCount = Object.values(changeAnalysis).filter(v => v && (Array.isArray(v) ? v.length > 0 : true)).length;
+  changeAnalysis.detectionConfidence = Math.min(100, changeCount * 25);
+
+  return changeAnalysis;
+}
+
+/**
+ * Suggest test fix based on frontend changes
+ */
+function suggestTestFix(testCode, frontendChanges, testInfo) {
+  const suggestions = {
+    strategy: 'manual_review',
+    actions: [],
+    canAutoFix: false,
+    confidence: 'low',
+    details: ''
+  };
+
+  // STRATEGY 1: URL Change - May need test assertion update
+  if (frontendChanges.urlChange) {
+    const { isTargeted, isFrontendBug, expectedPath, receivedPath } = frontendChanges.urlChange;
+    
+    if (isFrontendBug) {
+      suggestions.strategy = 'frontend_bug';
+      suggestions.actions.push('REPORT: Button navigates to invalid path (likely broken)');
+      suggestions.confidence = 'high';
+      suggestions.details = `Expected: ${expectedPath}, Got: ${receivedPath} (likely broken redirect)`;
+    } else if (isTargeted) {
+      suggestions.strategy = 'evaluate_and_decide';
+      suggestions.actions.push(`REVIEW: Button may have been intentionally redirected`);
+      suggestions.actions.push(`OLD assertion: ${expectedPath}`);
+      suggestions.actions.push(`NEW behavior: ${receivedPath}`);
+      suggestions.confidence = 'medium';
+      suggestions.details = `Decision: Is ${receivedPath} the new intended behavior?`;
+      
+      // Try to auto-decide based on test name/intent
+      if (/broken|error|invalid/i.test(testInfo.file)) {
+        suggestions.strategy = 'frontend_bug';
+        suggestions.actions = ['REPORT: Test is specifically for broken behavior - fix frontend'];
+        suggestions.confidence = 'high';
+      } else if (/redirect|navigate/i.test(testCode)) {
+        suggestions.strategy = 'update_test';
+        suggestions.canAutoFix = true;
+        suggestions.actions = [`AUTO-FIX: Update URL assertion to expect ${receivedPath}`];
+        suggestions.confidence = 'high';
+      }
+    }
+  }
+
+  // STRATEGY 2: Selector Change - Can usually auto-fix
+  else if (frontendChanges.selectorChanges.length > 0) {
+    suggestions.strategy = 'update_selector';
+    suggestions.canAutoFix = true;
+    suggestions.actions.push('AUTO-FIX: Try getByRole(), getByText(), or getByTestId()');
+    suggestions.actions.push('Avoid brittle .Mui* class selectors');
+    suggestions.confidence = 'high';
+    suggestions.details = 'Suggest resilient selector alternatives';
+  }
+
+  // STRATEGY 3: Text/Label Change - Can usually auto-fix
+  else if (frontendChanges.textChanges.length > 0 || frontendChanges.labelChanges.length > 0) {
+    suggestions.strategy = 'update_text';
+    suggestions.canAutoFix = true;
+    suggestions.actions.push('AUTO-FIX: Analyze frontend for new text/label');
+    suggestions.actions.push('Update text patterns in assertions');
+    suggestions.confidence = 'high';
+    suggestions.details = 'Text content has changed - can update test to match';
+  }
+
+  // STRATEGY 4: Structural/DOM Change - Needs manual review
+  else if (frontendChanges.structuralChanges.length > 0) {
+    suggestions.strategy = 'structural_review';
+    suggestions.actions.push('MANUAL REVIEW: Component architecture changed');
+    suggestions.actions.push('May need Shadow DOM piercing or new selectors');
+    suggestions.confidence = 'low';
+    suggestions.details = 'Architectural changes require code review';
+  }
+
+  return suggestions;
+}
+
+/**
+ * Extract Gemini decision from response
+ */
+function extractHealerDecision(geminiResponse) {
+  const decisionPattern = /DECISION:\s*([A-Z_]+)/i;
+  const match = geminiResponse.match(decisionPattern);
+  
+  if (match) {
+    const decision = match[1];
+    const validDecisions = ['FRONTEND_BUG', 'UPDATE_TEST', 'UPDATE_SELECTOR', 'UPDATE_TEXT', 'ARCHITECTURAL_FIX', 'MANUAL_REVIEW'];
+    
+    if (validDecisions.includes(decision)) {
+      return {
+        decision,
+        reasoning: extractReasoningFromResponse(geminiResponse),
+        isAutoFixable: ['UPDATE_TEST', 'UPDATE_SELECTOR', 'UPDATE_TEXT', 'ARCHITECTURAL_FIX'].includes(decision),
+        confidence: calculateConfidenceFromResponse(geminiResponse)
+      };
+    }
+  }
+  
+  return {
+    decision: 'UNKNOWN',
+    reasoning: 'Could not determine decision',
+    isAutoFixable: false,
+    confidence: 'low'
+  };
+}
+
+/**
+ * Extract reasoning from Gemini response
+ */
+function extractReasoningFromResponse(response) {
+  const reasoningPatterns = [
+    /DECISION:.*?\n([\s\S]*?)(?=\n###|\n##|FRONTEND_BUG|UPDATE|Fixed Code|$)/i,
+    /Reasoning[:\s]*([\s\S]{0,500}?)(?=\n###|\n##|Fixed|$)/i,
+    /([\s\S]{0,300}?)(?=FRONTEND_BUG|UPDATE|Fixed Code|$)/i
+  ];
+  
+  for (const pattern of reasoningPatterns) {
+    const match = response.match(pattern);
+    if (match && match[1]) {
+      return match[1].trim().substring(0, 500);
+    }
+  }
+  
+  return 'No explicit reasoning provided';
+}
+
+/**
+ * Calculate confidence from response
+ */
+function calculateConfidenceFromResponse(response) {
+  const confidence_indicators = {
+    'very high': 100,
+    'high certainty': 90,
+    'likely': 80,
+    'probably': 70,
+    'possibly': 60,
+    'might': 50,
+    'unclear': 30,
+    'unsure': 20,
+    'manual': 0
+  };
+  
+  for (const [phrase, score] of Object.entries(confidence_indicators)) {
+    if (response.toLowerCase().includes(phrase)) {
+      return score;
+    }
+  }
+  
+  return 50;
+}
+
+/**
+ * Extract what changed (URL, selector, text, etc.)
+ */
+function extractChangeDetails(geminiResponse, testInfo) {
+  const changeDetails = {
+    changeType: 'unknown',
+    oldValue: null,
+    newValue: null,
+    replacement: null
+  };
+  
+  // URL Change
+  const urlPattern = /(?:OLD|current|Old|expect[^\n]*?:\s*"(.*?)"[\s\n]*(?:NEW|new|assert|expect[^\n]*?:\s*"(.*?)")?|UPDATE.*?toHaveURL|navigate to:\s*"(.*?)")/i;
+  const urlMatch = geminiResponse.match(urlPattern);
+  if (urlMatch) {
+    changeDetails.changeType = 'url';
+    changeDetails.oldValue = urlMatch[1];
+    changeDetails.newValue = urlMatch[2] || urlMatch[3];
+  }
+  
+  // Selector Change
+  const selectorPattern = /Replace.*selector[\s\S]{0,200}?(?:with|→|:|to)\s*(?:\`|'|"|getBy|locator)([^\`'"\n]+)/i;
+  const selectorMatch = geminiResponse.match(selectorPattern);
+  if (selectorMatch) {
+    changeDetails.changeType = 'selector';
+    changeDetails.replacement = selectorMatch[1];
+  }
+  
+  // Text Change
+  const textPattern = /text[\s\n]*(?:from|change|update|to)[\s\n]*['"](.*?)['"]/i;
+  const textMatch = geminiResponse.match(textPattern);
+  if (textMatch) {
+    changeDetails.changeType = 'text';
+    changeDetails.newValue = textMatch[1];
+  }
+  
+  return changeDetails;
+}
+
+// ============ SOURCE CODE ANALYSIS SECURITY LAYER ============
+
+/**
+ * Security: Validate whitelisted file path for source code access
+ * Prevents path traversal, absolute paths, and access to sensitive files
+ */
+function validateSourceCodeFilePath(filePath) {
+  // Step 1: Check for path traversal attempts
+  if (filePath.includes('..')) {
+    auditSourceCodeAccess('PATH_TRAVERSAL_BLOCKED', filePath, { reason: 'Path traversal detected: .. not allowed' });
+    throw new Error(`❌ Path traversal detected in: ${filePath}`);
+  }
+
+  // Step 2: Block absolute paths
+  if (filePath.startsWith('/') || filePath.match(/^[a-z]:/i)) {
+    auditSourceCodeAccess('ABSOLUTE_PATH_BLOCKED', filePath, { reason: 'Absolute paths not allowed' });
+    throw new Error(`❌ Absolute paths not allowed: ${filePath}`);
+  }
+
+  // Step 3: Block sensitive files
+  const blockedPatterns = ['.env', 'secrets', 'credentials', 'package-lock', 'yarn.lock', 'node_modules', 'backend/', 'build/'];
+  for (const pattern of blockedPatterns) {
+    if (filePath.toLowerCase().includes(pattern.toLowerCase())) {
+      auditSourceCodeAccess('SENSITIVE_FILE_BLOCKED', filePath, { reason: `Blocked pattern: ${pattern}` });
+      throw new Error(`❌ File path blocked (sensitive): ${filePath}`);
+    }
+  }
+
+  // Step 4: Validate against whitelist
+  const whitelistPatterns = [
+    /^movieapp\/frontend\/src\/components\/[\w\-\.]+\.tsx$/,
+    /^movieapp\/frontend\/src\/pages\/[\w\-\.]+\.tsx$/,
+    /^movieapp\/frontend\/src\/components\/[\w\-\.]+\.ts$/
+  ];
+
+  if (!whitelistPatterns.some(pattern => pattern.test(filePath))) {
+    auditSourceCodeAccess('WHITELIST_MISMATCH', filePath, { reason: 'File path not whitelisted' });
+    throw new Error(`❌ File path not whitelisted: ${filePath}`);
+  }
+
+  return true;
+}
+
+/**
+ * Security: Extract UI elements from React/Web Component source code
+ * Uses regex-only parsing (no eval/execution) with timeout protection
+ */
+function extractUIElementsFromSourceCode(filePath) {
+  if (!HEALER_SOURCE_CODE_ANALYSIS) {
+    return { labels: [], buttons: [], headings: [], inputs: [], totalExtracted: 0 };
+  }
+
+  try {
+    // Security Step 1: Validate path
+    validateSourceCodeFilePath(filePath);
+
+    // Security Step 2: Check file existence
+    const fullPath = path.join(process.cwd(), filePath);
+    if (!fs.existsSync(fullPath)) {
+      auditSourceCodeAccess('FILE_NOT_FOUND', filePath, { reason: 'File does not exist' });
+      return { labels: [], buttons: [], headings: [], inputs: [], totalExtracted: 0 };
+    }
+
+    // Security Step 3: Check file size
+    const stats = fs.statSync(fullPath);
+    if (stats.size > HEALER_SOURCE_CODE_MAX_FILE_SIZE) {
+      auditSourceCodeAccess('FILE_SIZE_EXCEEDED', filePath, { 
+        attempted: stats.size, 
+        limit: HEALER_SOURCE_CODE_MAX_FILE_SIZE 
+      });
+      return { labels: [], buttons: [], headings: [], inputs: [], totalExtracted: 0 };
+    }
+
+    // Security Step 4: Check session extraction limit
+    sessionSourceCodeExtraction += stats.size;
+    if (sessionSourceCodeExtraction > HEALER_SOURCE_CODE_MAX_EXTRACTION_SIZE) {
+      auditSourceCodeAccess('SESSION_EXTRACTION_EXCEEDED', filePath, { 
+        sessionTotal: sessionSourceCodeExtraction, 
+        limit: HEALER_SOURCE_CODE_MAX_EXTRACTION_SIZE 
+      });
+      return { labels: [], buttons: [], headings: [], inputs: [], totalExtracted: 0 };
+    }
+
+    // Security Step 5: Check file count limit
+    if (sessionSourceCodeFiles.length >= MAX_SOURCE_CODE_FILES_PER_SESSION) {
+      auditSourceCodeAccess('FILES_LIMIT_EXCEEDED', filePath, { 
+        count: sessionSourceCodeFiles.length, 
+        limit: MAX_SOURCE_CODE_FILES_PER_SESSION 
+      });
+      return { labels: [], buttons: [], headings: [], inputs: [], totalExtracted: 0 };
+    }
+
+    // Security Step 6: Read file with timeout
+    const startTime = Date.now();
+    const timeout = 5000; // 5 seconds
+    const code = fs.readFileSync(fullPath, 'utf-8');
+    const elapsed = Date.now() - startTime;
+
+    if (elapsed > timeout) {
+      auditSourceCodeAccess('EXTRACTION_TIMEOUT', filePath, { elapsed, timeout });
+      return { labels: [], buttons: [], headings: [], inputs: [], totalExtracted: 0 };
+    }
+
+    // Security Step 7: Extract UI elements with safe regex patterns
+    const extracted = {
+      labels: [],
+      buttons: [],
+      headings: [],
+      inputs: [],
+      totalExtracted: 0
+    };
+
+    // Extract React labels (TSX)
+    if (filePath.endsWith('.tsx')) {
+      // Try first pattern
+      let labelMatches = code.matchAll(UI_ELEMENT_PATTERNS.reactLabels);
+      for (const match of labelMatches) {
+        if (match[1]) {
+          const cleanLabel = match[1].trim().replace(/[{}"']/g, '');
+          if (cleanLabel && !extracted.labels.includes(cleanLabel)) {
+            extracted.labels.push(cleanLabel);
+          }
+        }
+      }
+
+      // Try second pattern (fallback)
+      if (extracted.labels.length === 0) {
+        labelMatches = code.matchAll(UI_ELEMENT_PATTERNS.reactLabels2);
+        for (const match of labelMatches) {
+          if (match[1] && !extracted.labels.includes(match[1])) {
+            extracted.labels.push(match[1]);
+          }
+        }
+      }
+
+      const buttonMatches = code.matchAll(UI_ELEMENT_PATTERNS.reactButtons);
+      for (const match of buttonMatches) {
+        if (match[1] && !extracted.buttons.includes(match[1])) {
+          extracted.buttons.push(match[1]);
+        }
+      }
+
+      const headingMatches = code.matchAll(UI_ELEMENT_PATTERNS.headings);
+      for (const match of headingMatches) {
+        if (match[1] && !extracted.headings.includes(match[1])) {
+          extracted.headings.push(match[1]);
+        }
+      }
+    }
+
+    // Extract Web Component elements (TS)
+    if (filePath.endsWith('.ts')) {
+      const labelMatches = code.matchAll(UI_ELEMENT_PATTERNS.webComponentLabel);
+      for (const match of labelMatches) {
+        if (match[1] && !extracted.labels.includes(match[1])) {
+          extracted.labels.push(match[1]);
+        }
+      }
+
+      const valueMatches = code.matchAll(UI_ELEMENT_PATTERNS.webComponentValue);
+      for (const match of valueMatches) {
+        if (match[1] && !extracted.buttons.includes(match[1])) {
+          extracted.buttons.push(match[1]);
+        }
+      }
+    }
+
+    extracted.totalExtracted = extracted.labels.length + extracted.buttons.length + extracted.headings.length;
+
+    // Audit the successful read
+    sessionSourceCodeFiles.push(filePath);
+    auditSourceCodeAccess('SOURCE_CODE_EXTRACTED', filePath, {
+      bytesRead: stats.size,
+      labelsExtracted: extracted.labels.length,
+      buttonsExtracted: extracted.buttons.length,
+      headingsExtracted: extracted.headings.length,
+      totalExtracted: extracted.totalExtracted,
+      elapsed
+    });
+
+    return extracted;
+  } catch (err) {
+    auditSourceCodeAccess('EXTRACTION_ERROR', filePath, { error: err.message });
+    if (HEALER_VERBOSE) {
+      console.warn(`⚠️  Source code extraction error: ${err.message}`);
+    }
+    return { labels: [], buttons: [], headings: [], inputs: [], totalExtracted: 0 };
+  }
+}
+
+/**
+ * Detect component name from test file path or error context
+ */
+function detectComponentFromTest(testFile, testCode) {
+  try {
+    // Strategy 1: Extract from page.goto() URL pattern
+    const gotoMatch = testCode.match(/page\.goto\(['"]http:\/\/localhost:\d+\/([^'"]+)['"]/);
+    if (gotoMatch) {
+      const urlPath = gotoMatch[1];
+      if (urlPath.includes('user-details')) return 'movieapp/frontend/src/components/UserDetailsPage.tsx';
+      if (urlPath.includes('movie')) return 'movieapp/frontend/src/components/MovieDetails.tsx';
+      if (urlPath.includes('payment')) return 'movieapp/frontend/src/components/PaymentPage.tsx';
+    }
+
+    // Strategy 2: Extract from test name
+    const testName = testFile.toLowerCase();
+    if (testName.includes('user-detail') || testName.includes('label')) {
+      return 'movieapp/frontend/src/components/UserDetailsPage.tsx';
+    }
+    if (testName.includes('movie') && testName.includes('detail')) {
+      return 'movieapp/frontend/src/components/MovieDetails.tsx';
+    }
+    if (testName.includes('payment') || testName.includes('checkout')) {
+      return 'movieapp/frontend/src/components/PaymentPage.tsx';
+    }
+    if (testName.includes('seat')) {
+      return 'movieapp/frontend/src/components/SeatGridWrapper.tsx';
+    }
+
+    return null;
+  } catch (err) {
+    if (HEALER_VERBOSE) {
+      console.warn(`⚠️  Could not detect component: ${err.message}`);
+    }
+    return null;
+  }
+}
+
+/**
+ * Audit log for source code access (security compliance)
+ */
+function auditSourceCodeAccess(eventType, filePath, details = {}) {
+  try {
+    const logDir = path.dirname(SOURCE_CODE_ACCESS_AUDIT_LOG);
+    if (!fs.existsSync(logDir)) {
+      fs.mkdirSync(logDir, { recursive: true });
+    }
+
+    const logEntry = {
+      timestamp: new Date().toISOString(),
+      eventType,
+      filePath,
+      userId: process.env.USER || 'unknown',
+      details: sanitizeForLogging(details)
+    };
+
+    fs.appendFileSync(SOURCE_CODE_ACCESS_AUDIT_LOG, JSON.stringify(logEntry) + '\n', 'utf-8');
+  } catch (err) {
+    console.warn(`⚠️  Could not write audit log: ${err.message}`);
+  }
+}
+
+/**
+ * Sanitize sensitive data from logs
+ */
+function sanitizeForLogging(data) {
+  if (!data || typeof data !== 'object') return data;
+
+  const sensitivePatterns = [
+    /api[_-]?key\s*[:=]\s*[A-Za-z0-9_\-]+/gi,
+    /token\s*[:=]\s*[A-Za-z0-9_\-]+/gi,
+    /(password|secret|credential)\s*[:=]\s*[^,\]}\s]+/gi,
+    /https?:\/\/[^@]*@/gi
+  ];
+
+  let sanitized = JSON.stringify(data);
+  for (const pattern of sensitivePatterns) {
+    sanitized = sanitized.replace(pattern, '[REDACTED]');
+  }
+
+  return JSON.parse(sanitized);
+}
+
+/**
  * Generate comprehensive analysis prompt for Gemini with security sanitization
  */
 function generateAnalysisPrompt(testInfo, testCode) {
   // Security: Validate and sanitize all inputs
   if (detectPromptInjection(testCode)) {
     console.warn('⚠️  Warning: Potential prompt injection detected in test code. Proceeding with caution.');
+  }
+
+  // NEW: Attempt to extract UI elements from source code
+  let uiElementsFromSource = null;
+  const componentPath = detectComponentFromTest(testInfo.file || 'test', testCode);
+  if (HEALER_SOURCE_CODE_ANALYSIS && componentPath) {
+    if (HEALER_VERBOSE) {
+      console.log(`🔍 Analyzing source code for UI elements: ${componentPath}`);
+    }
+    uiElementsFromSource = extractUIElementsFromSourceCode(componentPath);
   }
   
   // Extract trace elements from Playwright trace file
@@ -1551,6 +2301,10 @@ function generateAnalysisPrompt(testInfo, testCode) {
   const sanitizedError = sanitizeErrorMessage(testInfo.error, 1500);
   const sanitizedTestCode = sanitizeForPrompt(testCode, 40000);
   
+  // NEW: Detect frontend changes upfront
+  const frontendChanges = detectFrontendChanges(testInfo, sanitizedTestCode);
+  const fixSuggestion = suggestTestFix(sanitizedTestCode, frontendChanges, testInfo);
+
   // Generate intelligent selector guidance based on test intent
   const selectorGuidance = generateSelectorGuidance(testCode);
   
@@ -1561,8 +2315,206 @@ function generateAnalysisPrompt(testInfo, testCode) {
   const domIssues = detectDOMArchitectureIssues(sanitizedTestCode, sanitizedError);
   const domArchitectureGuidance = generateDOMArchitectureGuidance(domIssues);
   const isDOMError = isDOMArchitectureError(sanitizedError, sanitizedTestCode);
-  
-  return `You are an expert Playwright test automation engineer specializing in fixing broken tests due to frontend element changes AND DOM architecture issues. Analyze this failing test and provide:
+
+  // NEW: Add UI element context to prompt if available
+  let uiElementContext = '';
+  if (uiElementsFromSource && uiElementsFromSource.totalExtracted > 0) {
+    // Extract labels the test is LOOKING FOR (both string literals and regex patterns)
+    const testLookupMatches = sanitizedTestCode.matchAll(UI_ELEMENT_PATTERNS.testLookupLabels);
+    const testLookupRegexMatches = sanitizedTestCode.matchAll(UI_ELEMENT_PATTERNS.testLookupLabelsRegex);
+    const testTextRegexMatches = sanitizedTestCode.matchAll(UI_ELEMENT_PATTERNS.testLookupTextRegex);
+    const testLabelsLookingFor = new Set();
+    
+    // Collect string literal matches
+    for (const match of testLookupMatches) {
+      if (match[1]) testLabelsLookingFor.add(match[1]);
+    }
+    
+    // Collect regex pattern matches (from /pattern/i style)
+    for (const match of testLookupRegexMatches) {
+      if (match[1]) testLabelsLookingFor.add(match[1]);
+    }
+    
+    // Collect getByText regex patterns too
+    for (const match of testTextRegexMatches) {
+      if (match[1]) testLabelsLookingFor.add(match[1]);
+    }
+
+    // Build comparison table
+    let labelComparisonTable = '';
+    if (testLabelsLookingFor.size > 0) {
+      labelComparisonTable = '**Label Mapping (Test Looking For vs Source Code):**\n```\n';
+      for (const testLabel of testLabelsLookingFor) {
+        const found = uiElementsFromSource.labels.find(l => l.toLowerCase() === testLabel.toLowerCase());
+        const status = found ? `✓ Found as "${found}"` : '✗ NOT FOUND - needs update';
+        labelComparisonTable += `${testLabel.padEnd(20)} → ${status}\n`;
+      }
+      labelComparisonTable += '```\n';
+    }
+
+    uiElementContext = `
+### 🎯 CRITICAL: UI ELEMENT ANALYSIS FROM SOURCE CODE
+
+**Component:** ${componentPath}
+
+**Actual Labels in Source Code:**
+${uiElementsFromSource.labels.length > 0 ? uiElementsFromSource.labels.map(l => `- "${l}"`).join('\n') : 'None'}
+
+${labelComparisonTable}
+
+**Action Required:** 
+If the test uses getByLabel('X') or getByLabel(/X/i) but 'X' is NOT in the list above, the test MUST be updated to use an existing label from the source code.
+
+Examples of corrections:
+- ❌ getByLabel('First Name') → ✅ getByLabel('Full Testing') [if 'Full Testing' exists in source]
+- ❌ getByLabel(/First Name/i) → ✅ getByLabel(/Full Testing/i) [regex version]
+- ❌ getByLabel('Submit') → ✅ getByLabel('Continue to Payment') [if 'Continue to Payment' exists]
+- ❌ getByLabel('Name') → ✅ getByLabel('Email') [match to actual source labels]
+
+**RULE**: Always use labels that exist in the source code list above. Never create new label names.
+`;
+  }
+
+  // NEW: Build behavioral change guidance
+  let behavioralGuidance = '';
+  if (frontendChanges.urlChange || frontendChanges.selectorChanges.length > 0 || 
+      frontendChanges.textChanges.length > 0 || frontendChanges.labelChanges.length > 0) {
+    
+    behavioralGuidance = `
+
+## 🔄 FRONTEND CHANGE DETECTED - INTELLIGENT ANALYSIS
+
+### Change Detection Results:
+${frontendChanges.urlChange ? `
+**URL/Navigation Change (Confidence: ${frontendChanges.urlChange.confidence})**
+- Expected Path: ${frontendChanges.urlChange.expectedPath}
+- Actual Path: ${frontendChanges.urlChange.receivedPath}
+- Is Targeted Redirect: ${frontendChanges.urlChange.isTargeted}
+- Likely Frontend Bug: ${frontendChanges.urlChange.isFrontendBug}
+` : ''}
+${frontendChanges.selectorChanges.length > 0 ? `
+**Selector Changes (${frontendChanges.selectorChanges.length} detected)**
+${frontendChanges.selectorChanges.map(s => `- ${s.type}: ${s.likely_cause}`).join('\n')}
+` : ''}
+${frontendChanges.textChanges.length > 0 ? `
+**Text/Content Changes (${frontendChanges.textChanges.length} detected)**
+${frontendChanges.textChanges.map(s => `- ${s.type}: ${s.likely_cause}`).join('\n')}
+` : ''}
+${frontendChanges.labelChanges.length > 0 ? `
+**Label/Placeholder Changes (${frontendChanges.labelChanges.length} detected)**
+${frontendChanges.labelChanges.map(s => `- ${s.type}: ${s.likely_cause}`).join('\n')}
+` : ''}
+
+### Suggested Fix Strategy: ${fixSuggestion.strategy.toUpperCase()}
+**Confidence: ${fixSuggestion.confidence}**
+**Can Auto-Fix: ${fixSuggestion.canAutoFix}**
+
+${fixSuggestion.actions.map(a => `- ${a}`).join('\n')}
+
+### YOUR DECISION LOGIC:
+
+**IF** (URL change detected AND received path is invalid "/" or empty):
+→ **DECISION: FRONTEND_BUG**
+→ **ACTION**: Report that button navigation is broken
+→ **TEST_UPDATE**: NO - Keep original assertion as spec
+→ Include: \`DECISION: FRONTEND_BUG\` in response
+
+**ELSE IF** (URL change detected AND received path is valid/targeted):
+→ **DECISION: EVALUATE**
+→ **ACTION**: Check test name/intent
+→ IF test name contains "book" or "navigate" → likely intended change → UPDATE_TEST
+→ IF test name contains "broken" or "error" → likely frontend bug → FRONTEND_BUG
+→ Otherwise → MANUAL_DECISION_NEEDED
+→ Include: \`DECISION: UPDATE_TEST\` or \`DECISION: FRONTEND_BUG\` in response
+
+**ELSE IF** (Selector not found BUT page loaded):
+→ **DECISION: UPDATE_SELECTOR**
+→ **ACTION**: Suggest resilient selector from: getByRole > getByText > getByTestId
+→ **TEST_UPDATE**: YES - Replace old selector with new one
+→ Include: \`DECISION: UPDATE_SELECTOR\` in response
+
+**ELSE IF** (Text/Label mismatch):
+→ **DECISION: UPDATE_TEXT**
+→ **ACTION**: Extract new text from error message or suggest resilient patterns
+→ **TEST_UPDATE**: YES - Update text in assertion
+→ Include: \`DECISION: UPDATE_TEXT\` in response
+
+**ELSE IF** (DOM architecture issue - Shadow DOM, iframe):
+→ **DECISION: ARCHITECTURAL_FIX**
+→ **ACTION**: Apply Shadow DOM piercing or iframe handling
+→ **TEST_UPDATE**: YES - Apply architectural fixes
+→ Include: \`DECISION: ARCHITECTURAL_FIX\` in response
+
+### CRITICAL REQUIREMENTS:
+1. **Always include your DECISION at start of response** (FRONTEND_BUG, UPDATE_TEST, UPDATE_SELECTOR, UPDATE_TEXT, ARCHITECTURAL_FIX)
+2. **Provide complete fixed code if TEST_UPDATE is YES**
+3. **Explain your reasoning for the decision**
+4. **For UPDATE_TEST: Include the exact new assertion/selector**
+5. **Maintain test intent** - don't silently accept broken behavior
+6. **If unsure**: Include both analysis and suggest manual review
+`;
+  }
+
+  return `You are an expert Playwright test automation engineer specializing in:
+1. **Fixing broken tests due to frontend changes** (selectors, URLs, text, design)
+2. **Detecting legitimate vs broken behavior changes**
+3. **Maintaining test intent while supporting frontend evolution**
+4. **DOM architecture issues** (Shadow DOM, iframes, Web Components)
+
+## ANALYSIS REQUIREMENTS:
+
+🔴 **PRIORITY 1: IF UI ELEMENTS CONTEXT PROVIDED BELOW:**
+- Use the "CURRENT UI ELEMENTS IN SOURCE CODE" section
+- Check if test is using getByLabel() or getByText() with names that DON'T match source code
+- If mismatch found: Change test to use labels/text from source code list
+- This is the PRIMARY indicator of what needs to be fixed
+- Example: Test uses getByLabel('First Name') but source only has getByLabel('Full Testing') → UPDATE test
+
+1. **Change Type Classification**: What type of frontend change caused failure?
+   - URL/Navigation change
+   - Selector broke (element not found, class changed)
+   - Text/Label changed (PRIORITIZE THIS IF UI CONTEXT AVAILABLE)
+   - DOM Architecture changed
+   - Other (describe)
+
+2. **Root Cause Analysis**: Why did this change happen?
+   - Element class names changed (Material-UI updates, design refactoring)
+   - Button navigation redirects to new URL
+   - Form labels/placeholders updated
+   - Component restructured with Shadow DOM or iframes
+   - Text content updated in frontend
+
+3. **Decision: Is This a Test Fix or Frontend Bug?**
+   - Can the test be updated to match new behavior? → UPDATE_TEST
+   - Should the frontend behavior be fixed? → FRONTEND_BUG
+   - Need to restructure selector strategy? → UPDATE_SELECTOR
+   - Need to update text patterns? → UPDATE_TEXT
+   - Architectural query changes needed? → ARCHITECTURAL_FIX
+
+4. **Recommended Fixes**: Provide clear, prioritized steps
+
+5. **Fixed Code**: Provide COMPLETE corrected test code (if UPDATE_TEST or UPDATE_SELECTOR or UPDATE_TEXT or ARCHITECTURAL_FIX)
+
+Error Type: ${sanitizedErrorType}
+Error Message:
+\`\`\`
+${sanitizedError}
+\`\`\`
+
+Current Test Code:
+\`\`\`typescript
+${sanitizedTestCode}
+\`\`\`
+
+${uiElementContext}
+
+${selectorGuidance}
+
+${buttonTextGuidance}
+
+${behavioralGuidance}
+
+${domArchitectureGuidance}
 
 1. **Root Cause Analysis**: Explain why the test is failing (element not found, changed selector, etc.)
 2. **Error Classification**: Identify the type of error (timeout, assertion, selector_not_found, etc.)
@@ -1623,27 +2575,33 @@ Analysis Focus Areas:
 ${buttonTextGuidance}
 ${domArchitectureGuidance}
 
-IMPORTANT: 
-1. Always output the COMPLETE fixed code in a code block, never truncate it
-2. PRIORITIZE resilient selectors over Material-UI class names - this is the primary goal
-3. If error indicates missing elements, the selector likely changed in frontend - suggest robust alternatives
-4. Test code should work across multiple Material-UI versions without changes
-5. When fixing, prefer this priority: getByRole > getByText > getByLabel > getByTestId > data attributes > text content
-6. NEVER suggest using .querySelector with class names for Material-UI components
-${isDOMError ? '\n7. **DOM ARCHITECTURE ISSUE DETECTED**: This error is likely caused by Shadow DOM, iframe, or Web Component architecture. Apply the DOM Architecture fixes FIRST before selector fixes.' : ''}`;
+### Selector Resilience Strategy:
+- **Material-UI Components**: Avoid .Mui* classes → Use getByRole('button', { name: /text/i })
+- **Buttons**: getByRole('button', { name: /text/i }) > getByText(/text/i) > getByTestId
+- **Inputs**: getByLabel(/label/i) > getByPlaceholder(/placeholder/i) > getByTestId
+- **Links**: getByRole('link', { name: /text/i }) > getByText
+- **Custom Elements**: Nested locators for Shadow DOM: page.locator('parent').locator('.child')
+
+### TEST INTENT:
+Based on test file and name: \`${testInfo.file}\`
+The test should verify: \`${sanitizedTestCode.match(/test\s*\(\s*['"](.*?)['"]/) ? sanitizedTestCode.match(/test\s*\(\s*['"](.*?)['"]/) [1] : 'Unknown'}\`
+
+CRITICAL INSTRUCTIONS:
+1. Start response with: \`DECISION: [ONE OF: FRONTEND_BUG, UPDATE_TEST, UPDATE_SELECTOR, UPDATE_TEXT, ARCHITECTURAL_FIX, MANUAL_REVIEW]\`
+2. Provide complete fixed code in \`\`\`typescript code block if updating test
+3. DO NOT truncate code - provide full working test
+4. Explain decision reasoning
+5. For FRONTEND_BUG: describe what developers should fix
+${isDOMError ? '\n6. DOM ARCHITECTURE ISSUE DETECTED: Apply DOM architecture fixes FIRST' : ''}
+`;
 }
 
-
-
-/**
- * Call Gemini API with retry mechanism and timeout (Retry Mechanism + API Timeout)
- */
 async function analyzeWithGemini(testInfo, testCode, retryCount = 0) {
   try {
     await rateLimitAndWait();
     
     const model = genAI.getGenerativeModel({
-      model: 'gemini-2.5-flash-lite',
+      model: 'gemini-2.5-flash',
     });
 
     const prompt = generateAnalysisPrompt(testInfo, testCode);
@@ -2116,6 +3074,62 @@ function displayFixedCode(fixedCode, testTitle) {
 /**
  * Display healing summary
  */
+/**
+ * Display enhanced healing summary with decision breakdown
+ */
+function displayEnhancedSummary(healingResults) {
+  console.log(`\n${'═'.repeat(70)}`);
+  console.log(`📊 HEALING SESSION COMPLETE`);
+  console.log(`═'.repeat(70)}`);
+  
+  const stats = getSessionStatistics();
+  const results = healingResults.tests;
+  
+  console.log(`\n✅ Tests Processed: ${results.length}`);
+  console.log(`✅ Tests Fixed: ${results.filter(r => r.fixed).length}`);
+  console.log(`🔴 Frontend Bugs Detected: ${results.filter(r => r.decision === 'FRONTEND_BUG').length}`);
+  console.log(`⚠️  Manual Review Needed: ${results.filter(r => r.decision === 'MANUAL_REVIEW').length}`);
+  
+  if (results.filter(r => r.fixed).length > 0) {
+    console.log(`\n📝 Changes Made:`);
+    const byType = {};
+    results.forEach(r => {
+      if (r.changeType && r.changeType !== 'unknown') {
+        byType[r.changeType] = (byType[r.changeType] || 0) + 1;
+      }
+    });
+    Object.entries(byType).forEach(([type, count]) => {
+      console.log(`   - ${type}: ${count} update(s)`);
+    });
+  }
+  
+  if (results.filter(r => r.decision === 'FRONTEND_BUG').length > 0) {
+    console.log(`\n🔴 FRONTEND ISSUES TO FIX:`);
+    results.filter(r => r.decision === 'FRONTEND_BUG').forEach((r, i) => {
+      console.log(`   ${i+1}. ${r.file} → ${r.title}`);
+      if (r.recommendations && r.recommendations.length > 0) {
+        console.log(`      Reason: ${r.recommendations[0]}`);
+      }
+    });
+  }
+  
+  console.log(`\n📊 Decision Breakdown:`);
+  stats.decisionBreakdown && Object.entries(stats.decisionBreakdown).forEach(([decision, count]) => {
+    if (count > 0) {
+      console.log(`   - ${decision}: ${count}`);
+    }
+  });
+  
+  console.log(`\n📈 Confidence Distribution:`);
+  console.log(`   - High (70-100%): ${stats.confidenceDistribution.high}`);
+  console.log(`   - Medium (40-70%): ${stats.confidenceDistribution.medium}`);
+  console.log(`   - Low (<40%): ${stats.confidenceDistribution.low}`);
+  
+  const logsPath = persistLogs();
+  console.log(`\n📍 Logs saved to: ${logsPath}`);
+  console.log(`${'═'.repeat(70)}\n`);
+}
+
 function displayHealingSummary(healingResults) {
   console.log(`\n\x1b[1m\x1b[42m${'═'.repeat(70)}\x1b[0m`);
   console.log(`\x1b[1m\x1b[42m📊 HEALING SESSION SUMMARY\x1b[0m`);
@@ -2242,7 +3256,10 @@ async function heal() {
       fixed: false,
       verified: false,
       fixedCode: null,
-      failureReason: null
+      failureReason: null,
+      decision: null,
+      changeType: null,
+      backup: null
     };
 
     // Check if should heal
@@ -2254,11 +3271,21 @@ async function heal() {
     }
     
     if (!shouldHealTest(test, testCode)) {
-      console.log('⏭️  Skipping: Test error indicates infrastructure/configuration issue');
-      testResult.failureReason = 'Infrastructure/Configuration error';
+      const classifiedType = test.classifiedType || 'UNKNOWN';
+      console.log(`⏭️  Skipping: ${classifiedType === 'INFRASTRUCTURE' ? 'Infrastructure/connection error' : 'Other non-healable error'}`);
+      testResult.failureReason = `${classifiedType} error - not healable`;
       healingResults.tests.push(testResult);
       continue;
     }
+
+    // Continue with normal healing...
+    console.log(`\n${'═'.repeat(70)}`);
+    console.log(`🔧 Healing: ${test.file}`);
+    console.log(`   Test: ${test.title}`);
+    console.log(`${'═'.repeat(70)}`);
+
+    const backup = createBackup(test.filePath);
+    auditLog('healing_started', test.filePath, `Test: ${test.title}`);
 
     // Detect DOM architecture issues
     const domIssues = detectDOMArchitectureIssues(testCode, test.error);
@@ -2282,13 +3309,51 @@ async function heal() {
       console.log(testCode);
     }
 
-    const analysis = await analyzeWithGemini(test, testCode);
-    if (!analysis) {
-      testResult.failureReason = 'Gemini analysis failed or timed out';
+    // Send to Gemini with ENHANCED prompt
+    const geminiResponse = await analyzeWithGemini(test, testCode);
+    if (!geminiResponse) {
+      console.log('❌ Gemini analysis failed');
+      rollbackFix(test.filePath, backup);
+      testResult.failureReason = 'Gemini API error';
+      testResult.backup = backup;
       healingResults.tests.push(testResult);
       continue;
     }
 
+    // NEW: Extract decision from Gemini
+    const healerDecision = extractHealerDecision(geminiResponse);
+    const changeDetails = extractChangeDetails(geminiResponse, test);
+    
+    console.log(`\n📋 Healer Decision: ${healerDecision.decision}`);
+    console.log(`   Confidence: ${healerDecision.confidence}%`);
+    console.log(`   Reasoning: ${healerDecision.reasoning.substring(0, 100)}...`);
+
+    // Log decision for audit trail
+    logHealingEvent('healer_decision', test.title, 
+      `Decision: ${healerDecision.decision}`,
+      `Confidence: ${healerDecision.confidence}%\nChange: ${changeDetails.changeType}`,
+      {
+        decision: healerDecision.decision,
+        confidence: healerDecision.confidence,
+        changeType: changeDetails.changeType,
+        reasoning: healerDecision.reasoning
+      }
+    );
+
+    // NEW: If frontend bug but high confidence, skip fixing test
+    if (healerDecision.decision === 'FRONTEND_BUG' && healerDecision.confidence >= 70) {
+      console.log('🛑 Skipping test fix - frontend needs to be fixed first');
+      testResult.decision = 'FRONTEND_BUG';
+      testResult.recommendations = healerDecision.reasoning;
+      testResult.failureReason = `Frontend bug (${healerDecision.confidence}% confident)`;
+      testResult.backup = backup;
+      healingResults.tests.push(testResult);
+      
+      auditLog('healing_skipped_frontend_bug', test.filePath, healerDecision.reasoning);
+      continue;
+    }
+
+    const analysis = geminiResponse;
     testResult.analysis = analysis;
     displayAnalysis(analysis, test.title);
 
@@ -2296,7 +3361,25 @@ async function heal() {
     if (fixedCode) {
       console.log('\n✅ Fixed code extracted successfully');
       testResult.fixedCode = fixedCode;
+      testResult.decision = healerDecision.decision;
+      testResult.changeType = changeDetails.changeType;
+      testResult.backup = backup;
       displayFixedCode(fixedCode, test.title);
+
+      // NEW: Enhanced logging with change details
+      if (changeDetails.changeType !== 'unknown') {
+        logHealingEvent('test_fixed_with_change', test.title,
+          `Old ${changeDetails.changeType}: ${changeDetails.oldValue || 'N/A'}`,
+          `New ${changeDetails.changeType}: ${changeDetails.newValue || changeDetails.replacement || 'N/A'}`,
+          {
+            decision: healerDecision.decision,
+            changeType: changeDetails.changeType,
+            oldValue: changeDetails.oldValue,
+            newValue: changeDetails.newValue,
+            confidence: healerDecision.confidence
+          }
+        );
+      }
 
       if (options.autoFix) {
         console.log('🔧 Applying fixes...');
@@ -2361,6 +3444,7 @@ async function heal() {
     } else {
       console.error('❌ Could not extract fixed code from Gemini response');
       testResult.failureReason = 'Code extraction failed';
+      testResult.backup = backup;
 
       // Log extraction failure
       logHealingEvent('locator_failure', test.title, 'extraction_attempt', null, {
@@ -2385,6 +3469,7 @@ async function heal() {
   console.log('\n✅ Healing session complete!');
   
   displayHealingSummary(healingResults);
+  displayEnhancedSummary(healingResults);
   generateErrorReport(healingResults);
 
   // Persist logs before generating HTML report

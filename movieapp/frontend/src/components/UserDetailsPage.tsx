@@ -135,8 +135,8 @@ const UserDetailsPage: React.FC = () => {
         return "";
 
       case 'phone':
-        if (!value) return "Phone number is required";
-        if (!phoneRegex.test(value)) return "Please enter a valid phone number in format (123) 456-7890";
+        if (!value) return "mobile number is required";
+        if (!phoneRegex.test(value)) return "Please enter a valid mobile number in format (123) 456-7890";
         return "";
 
       case 'age':
@@ -274,7 +274,7 @@ const UserDetailsPage: React.FC = () => {
               <Stack spacing={3}>
                 <Box sx={{ display: 'flex', gap: 2 }}>
                   <StyledTextField
-                    label="First Name"
+                    label="Full Name"
                     name="firstName"
                     value={userDetails.firstName}
                     onChange={handleInputChange}
@@ -320,13 +320,13 @@ const UserDetailsPage: React.FC = () => {
                 />
                 <Box sx={{ display: 'flex', gap: 2 }}>
                   <StyledTextField
-                    label="Phone Number"
+                    label="Mobile Number"
                     name="phone"
                     value={userDetails.phone}
                     onChange={handleInputChange}
                     required
                     fullWidth
-                    placeholder="(123) 456-7890"
+                    placeholder="+91 (123) 456-7890"
                     inputProps={{ 
                       maxLength: 14,
                       inputMode: 'numeric'

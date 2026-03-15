@@ -40,14 +40,9 @@ test('Load localhost:3000, navigate to movie details for ID 5', async ({ page })
   await movie3Link.click();
 
   await page.waitForLoadState('load', { timeout: 20000 });
-
   await expect(page.url()).toContain('/movie/5');
-
   await page.getByRole('button', {name: '14:30'}).click();
-  
   await page.waitForLoadState('networkidle');
-
-
   await expect(page.getByRole('button', { name: /14:30|4:15/i })).toBeVisible();
 
 });

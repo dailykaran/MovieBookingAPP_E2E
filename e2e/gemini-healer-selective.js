@@ -27,6 +27,17 @@ dotenv.config({ path: envPath });
 
 const GEMINI_API_KEY_TEST = process.env.GEMINI_API_KEY_TEST;
 
+// CRITICAL: Only TRUE infrastructure errors that CANNOT be fixed by test changes
+const INFRASTRUCTURE_ERRORS = [
+  'connection refused', 'connection reset', 'enotfound', 'econnrefused',
+  'host not found', 'dns', 'getaddrinfo', 'econnreset',
+  'target page, context or browser has been closed', 'browser context was closed',
+  'websocket closed', 'target closed', 'session not created',
+  'err_name_not_resolved', 'err_connection_refused', 'err_connection_reset',
+  'err_network_changed', 'timeout waiting for connection',
+  'socket hang up', 'socket error', 'epipe', 'enotfound'
+];
+
 // Validate API key
 if (!GEMINI_API_KEY_TEST) {
   console.error('❌ GEMINI_API_KEY_TEST environment variable is not set!');
@@ -34,6 +45,40 @@ if (!GEMINI_API_KEY_TEST) {
 }
 
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY_TEST);
+
+/**
+ * Classify error type to determine if it can be healed
+ */
+function classifyErrorType(errorMessage) {
+  if (!errorMessage) return 'UNKNOWN';
+  
+  const lower = errorMessage.toLowerCase();
+  
+  // Check for TRUE infrastructure/connection errors
+  for (const infError of INFRASTRUCTURE_ERRORS) {
+    if (lower.includes(infError)) {
+      return 'INFRASTRUCTURE';
+    }
+  }
+  
+  // Check for timeout types
+  if (lower.includes('timeout')) {
+    if (lower.includes('waiting for') && (lower.includes('connection') || lower.includes('server'))) {
+      return 'INFRASTRUCTURE';
+    }
+    if (lower.includes('browser') && lower.includes('closed')) {
+      return 'INFRASTRUCTURE';
+    }
+    return 'TIMEOUT_ASSERTION';
+  }
+  
+  // Check for assertion/selector errors (fixable)
+  if (lower.includes('expect') || lower.includes('selector') || lower.includes('not found')) {
+    return 'ASSERTION';
+  }
+  
+  return 'UNKNOWN';
+}
 
 /**
  * Extract test blocks from code
@@ -105,7 +150,9 @@ async function analyzeTestBlock(testBlock) {
       model: 'gemini-2.5-flash'
     });
 
-    const prompt = `You are a Playwright test expert. Fix this failing test block.
+    const prompt = `You are an expert Playwright test automation engineer. Fix this failing test block.
+
+CRITICAL: Start your response with: DECISION: [UPDATE_TEST, FRONTEND_BUG, UPDATE_SELECTOR, UPDATE_TEXT, or MANUAL_REVIEW]
 
 Test Name: ${testBlock.name}
 
@@ -114,15 +161,41 @@ Current Test Code:
 ${testBlock.code}
 \`\`\`
 
-Please:
-1. Identify why this test is failing
-2. Fix only the failing test block (do not include beforeEach, imports, or other test blocks)
-3. Return ONLY the fixed test block wrapped in \`\`\`typescript\`\`\` code fence
-4. Keep the same test name and structure
-5. Prioritize resilient selectors: getByRole > getByText > getByLabel > getByTestId
-6. Avoid brittle .Mui* class selectors
+Analysis Requirements:
+1. **Identify the failure cause**:
+   - Is it a selector issue (element not found)?
+   - Is it a URL/navigation change?
+   - Is it a text/label change?
+   - Is it a frontend bug (broken behavior)?
+   - Is it a DOM architecture issue?
 
-Return ONLY the fixed test block code, nothing else.`;
+2. **Make a decision**:
+   - If test logic needs fixing → DECISION: UPDATE_TEST
+   - If only selector needs updating → DECISION: UPDATE_SELECTOR
+   - If text/label changed → DECISION: UPDATE_TEXT
+   - If frontend is broken → DECISION: FRONTEND_BUG
+   - If unsure → DECISION: MANUAL_REVIEW
+
+3. **Provide the fix**:
+   - For UPDATE_TEST/UPDATE_SELECTOR/UPDATE_TEXT: Return ONLY corrected test block
+   - For FRONTEND_BUG: Describe what frontend developers should fix
+   - Follow selector priority: getByRole > getByText > getByLabel > getByTestId > avoid .Mui*
+   - Preserve test name and overall structure
+
+4. **Return format**:
+   - Start with: DECISION: [choice]
+   - Brief reasoning (1-2 lines)
+   - Then provide:
+     - If FRONTEND_BUG: Description of frontend issue
+     - If UPDATE_*: Full fixed test block in \`\`\`typescript\`\`\` fence
+   - Keep same test name and structure
+   - For selectors: prioritize resilient over Material-UI classes
+
+IMPORTANT:
+- DO NOT include other test blocks, imports, or wrapper functions
+- ONLY the failing test block that needs fixing
+- NO truncation - provide complete working code
+- Maintain test intent, don't silently accept broken behavior`;
 
     console.log(`📡 Sending ${testBlock.name} to Gemini...`);
     
@@ -157,13 +230,78 @@ function extractTestBlockCode(response) {
 }
 
 /**
+ * Extract decision from Gemini response
+ */
+function extractDecisionFromResponse(response) {
+  const decisionPattern = /DECISION:\s*([A-Z_]+)/i;
+  const match = response.match(decisionPattern);
+  
+  if (match) {
+    const decision = match[1];
+    const validDecisions = ['FRONTEND_BUG', 'UPDATE_TEST', 'UPDATE_SELECTOR', 'UPDATE_TEXT', 'MANUAL_REVIEW'];
+    
+    if (validDecisions.includes(decision)) {
+      return {
+        decision,
+        reasoning: extractReasoningFromResponse(response)
+      };
+    }
+  }
+  
+  return { decision: 'UNKNOWN', reasoning: '' };
+}
+
+/**
+ * Extract reasoning from response
+ */
+function extractReasoningFromResponse(response) {
+  const reasoningPatterns = [
+    /DECISION:.*?\n([\s\S]{0,200}?)(?=\n\`\`\`|Fixed|FRONTEND|$)/i,
+    /([\s\S]{0,150}?)(?=\`\`\`)/i
+  ];
+  
+  for (const pattern of reasoningPatterns) {
+    const match = response.match(pattern);
+    if (match && match[1]) {
+      return match[1].trim().substring(0, 200);
+    }
+  }
+  
+  return '';
+}
+
+/**
+ * Recursively collect all specs from nested suite structure
+ */
+function collectSpecsRecursive(suite) {
+  const allSpecs = [];
+  
+  // Add specs from current level
+  if (suite.specs && Array.isArray(suite.specs)) {
+    suite.specs.forEach(spec => {
+      allSpecs.push(spec);
+    });
+  }
+  
+  // Recursively add specs from nested suites
+  if (suite.suites && Array.isArray(suite.suites)) {
+    suite.suites.forEach(nestedSuite => {
+      const nestedSpecs = collectSpecsRecursive(nestedSuite);
+      allSpecs.push(...nestedSpecs);
+    });
+  }
+  
+  return allSpecs;
+}
+
+/**
  * Get failing tests from results.json
  */
 function getFailingTestNames() {
-  const resultsPath = path.join(process.cwd(), 'test-results', 'results.json');
+  const resultsPath = path.join(process.cwd(), 'reports/results', 'results.json');
   
   if (!fs.existsSync(resultsPath)) {
-    console.error('❌ test-results/results.json not found');
+    console.error('❌ reports/results/results.json not found');
     return [];
   }
 
@@ -173,18 +311,19 @@ function getFailingTestNames() {
 
     if (results.suites && Array.isArray(results.suites)) {
       results.suites.forEach(suite => {
-        if (suite.specs && Array.isArray(suite.specs)) {
-          suite.specs.forEach(spec => {
-            if (spec.tests && Array.isArray(spec.tests)) {
-              spec.tests.forEach(test => {
-                // Check if test failed (status !== 'expected' when status is 'failed')
-                if (test.results && test.results[0] && test.results[0].status !== 'passed') {
-                  failingTests.push(spec.title);
-                }
-              });
-            }
-          });
-        }
+        // Recursively collect specs from main level and nested suites
+        const allSpecs = collectSpecsRecursive(suite);
+        
+        allSpecs.forEach(spec => {
+          if (spec.tests && Array.isArray(spec.tests)) {
+            spec.tests.forEach(test => {
+              // Check if test failed (status !== 'expected' when status is 'failed')
+              if (test.results && test.results[0] && test.results[0].status !== 'passed') {
+                failingTests.push(spec.title);
+              }
+            });
+          }
+        });
       });
     }
 
@@ -260,6 +399,20 @@ async function healSelectively() {
       const analysis = await analyzeTestBlock(block);
       if (!analysis) {
         console.log(`❌ Analysis failed for "${block.name}"`);
+        continue;
+      }
+
+      // NEW: Extract decision
+      const healerDecision = extractDecisionFromResponse(analysis);
+      console.log(`📋 Healer Decision: ${healerDecision.decision}`);
+      if (healerDecision.reasoning) {
+        console.log(`   ${healerDecision.reasoning}`);
+      }
+
+      // NEW: Skip if frontend bug
+      if (healerDecision.decision === 'FRONTEND_BUG') {
+        console.log(`🔴 FRONTEND BUG DETECTED - Skipping test fix`);
+        console.log(`   Please fix the frontend code first`);
         continue;
       }
 
