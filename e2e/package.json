@@ -1,26 +1,45 @@
 {
-  "name": "automation_booking",
+  "name": "self-healing-e2e",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Self-healing E2E test system powered by Gemini 2.5 Flash / Gemini 3 Pro + Vertex AI Agent",
+  "main": "src/index.js",
   "type": "module",
-  "scripts": {
-    "test": "playwright test",
-    "heal:gemini": "node gemini-healer.js",
-    "heal:gemini:auto": "node gemini-healer.js --auto-fix",
-    "heal:gemini:verbose": "node gemini-healer.js --auto-fix --verbose",
-    "test:debug": "playwright test --debug --headed"
+  "engines": {
+    "node": ">=20.0.0"
   },
-  "keywords": [],
+  "scripts": {
+    "start": "node src/index.js",
+    "heal:watch": "node src/watcher.js",
+    "test": "playwright test",
+    "test:unit": "vitest run",
+    "test:debug": "playwright test --debug --headed",
+    "audit:review": "node src/audit-viewer.js",
+    "validate:env": "node src/validate-env.js"
+  },
+  "keywords": [
+    "playwright",
+    "e2e",
+    "self-healing",
+    "gemini",
+    "vertex-ai"
+  ],
   "author": "",
   "license": "ISC",
-  "devDependencies": {
+  "dependencies": {
+    "@google-cloud/vertexai": "^1.7.0",
+    "@google-cloud/aiplatform": "^3.22.0",
     "@google/generative-ai": "^0.3.1",
     "@playwright/test": "^1.56.1",
-    "@types/node": "^24.10.1"
-  },
-  "dependencies": {
     "adm-zip": "^0.5.16",
-    "dotenv": "^17.2.3"
+    "ajv": "^8.16.0",
+    "dotenv": "^17.2.3",
+    "fast-redact": "^3.3.0",
+    "p-retry": "^6.2.0",
+    "winston": "^3.13.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "vitest": "^2.0.0"
   }
 }

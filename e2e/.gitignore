@@ -15,4 +15,17 @@ node_modules/
 /.healer-backups/
 /logs/
 
+# Self-Healing system
+secrets/
+*.pem
+*.p12
+gcp-service-account.json
+application_default_credentials.json
+
+# Artifacts (exclude from git, use artifact storage)
+artifacts/screenshots/
+artifacts/patches/
+artifacts/heal-audit.jsonl
+artifacts/heal-errors.log
+
 
