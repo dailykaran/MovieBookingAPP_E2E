@@ -1,6 +1,6 @@
-# Copilot Instructions for ShowGlow Movie Booking - Monorepo
+# Copilot Instructions for TicketsVenue Movie Booking - Monorepo
 
-**ShowGlow** is an educational full-stack cinema seat booking application demonstrating Redux state threading, race condition prevention, file-based persistence, and E2E testing patterns. **Not production-ready**: uses JSON files instead of databases, no authentication, no payment processing.
+**TicketsVenue** is an educational full-stack cinema seat booking application demonstrating Redux state threading, race condition prevention, file-based persistence, and E2E testing patterns. **Not production-ready**: uses JSON files instead of databases, no authentication, no payment processing.
 
 ## Workspace Structure & Startup
 
@@ -196,7 +196,7 @@ cd e2e && npm run test                     # After one-time setup
 - Use Redux selectors (not direct state access) for consistency
 
 ### When Adding E2E Tests
-- **Prefer text selectors** over Material-UI classes (brittle): `page.locator('text=ShowGlow')` is more resilient
+- **Prefer text selectors** over Material-UI classes (brittle): `page.locator('text=TicketsVenue')` is more resilient
 - Tests assume 8 seeded movies; if dataset changes, update [e2e/tests/seed.spec.ts](e2e/tests/seed.spec.ts)
 - **No `test.only` in CI** (will fail CI); use `--grep` for local filtering
 - Traces auto-captured on first retry (`trace: 'on-first-retry'` in config)

@@ -6,7 +6,7 @@
 
 ## SLIDE 1: Title Slide (2 min)
 ### **Self-Healing Test Automation with Gemini AI**
-#### *Intelligent E2E Testing for ShowGlow Cinema Booking Platform*
+#### *Intelligent E2E Testing for TicketsVenue Cinema Booking Platform*
 
 **Subtitle**: Reduce Manual Test Maintenance by 80% with AI-Powered Healing
 
@@ -967,7 +967,7 @@ ls -lt reports/audit/.healer-backups | head -5
 ✅ GOOD: Small, focused tests
 test('should load movie list', async ({ page }) => {
   await page.goto('/')
-  await expect(page.locator('text=ShowGlow')).toBeVisible()
+  await expect(page.locator('text=TicketsVenue')).toBeVisible()
 })
 
 ✅ GOOD: Clear, descriptive error messages
@@ -1258,7 +1258,7 @@ Year 2025:
 Documentation: e2e/MD_Files/SELF_HEALING_MECHANISM_ANALYSIS.md
 GitHub Issues: Report bugs and feature requests
 Slack Channel: #test-automation-team
-Demo Repository: ShowGlow E2E Tests
+Demo Repository: TicketsVenue E2E Tests
 ```
 
 **Presenter Notes**:
@@ -1439,5 +1439,5 @@ This 23-slide presentation covers:
 ---
 
 **Created**: March 15, 2026
-**For**: ShowGlow Cinema Booking Platform
+**For**: TicketsVenue Cinema Booking Platform
 **Topic**: AI-Powered Self-Healing Test Automation with Gemini

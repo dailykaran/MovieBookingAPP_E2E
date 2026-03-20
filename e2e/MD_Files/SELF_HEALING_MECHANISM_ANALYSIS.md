@@ -1,6 +1,6 @@
 # E2E Self-Healing Mechanism - Complete Technical Analysis
 
-**Document Purpose**: Deep dive study into the Gemini-powered Playwright auto-healing system used in ShowGlow E2E test automation.
+**Document Purpose**: Deep dive study into the Gemini-powered Playwright auto-healing system used in TicketsVenue E2E test automation.
 
 **Last Updated**: March 15, 2026  
 **Status**: Comprehensive Analysis  
@@ -1674,7 +1674,7 @@ cat reports/results/healing-logs.json |
 // ✅ GOOD: Small, focused tests
 test('should load movie list', async ({ page }) => {
   await page.goto('/')
-  await expect(page.locator('text=ShowGlow')).toBeVisible()
+  await expect(page.locator('text=TicketsVenue')).toBeVisible()
 })
 
 test('should navigate to movie details', async ({ page }) => {

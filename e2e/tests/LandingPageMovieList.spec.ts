@@ -9,9 +9,9 @@ test.beforeEach(async ({ page }) => {
 test('Load localhost:3000, verify application display and navigate to movie details for The Avengers', async ({ page }) => {
 
   // Verify the page title contains one of the expected strings.
-  await expect(page).toHaveTitle(/React|Movie|ShowGlow|Movie Booking/i);
+  await expect(page).toHaveTitle(/React|Movie|TicketsVenue|Movie Booking/i);
 
-  const mainHeadingText = page.getByText(/ShowGlow/i);
+  const mainHeadingText = page.getByText(/TicketsVenue/i);
   await expect(mainHeadingText).toBeVisible({ timeout: 15000 });
 
   // Using getByText for resilience, assuming the movie title text itself is clickable or part of a clickable element.
@@ -34,7 +34,7 @@ test('Load localhost:3000, verify application display and navigate to movie deta
 
 
 test('Load localhost:3000, navigate to movie details for ID 5', async ({ page }) => {
- await expect(page).toHaveTitle(/React|Movie|ShowGlow|Movie Booking/i);
+ await expect(page).toHaveTitle(/React|Movie|TicketsVenue|Movie Booking/i);
 
   const movie3Link = page.locator('a[href*="movie/5"]'); 
   await movie3Link.click();

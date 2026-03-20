@@ -101,7 +101,7 @@
 **Test Feature 2.3 - Download Receipt:**
 1. On confirmation page, look for "Download Receipt" button
 2. Click button
-3. Browser downloads file: `ShowGlow_Receipt_BK12345678.txt`
+3. Browser downloads file: `TicketsVenue_Receipt_BK12345678.txt`
 4. Open file in notepad, verify contains:
    - Booking code
    - Movie title

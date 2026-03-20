@@ -1,8 +1,8 @@
-# Copilot Instructions for ShowGlow Movie Booking Application
+# Copilot Instructions for TicketsVenue Movie Booking Application
 
 ## Project Overview
 
-**ShowGlow** is a full-stack movie booking application with a monorepo structure containing `backend/` (Express.js API), `frontend/` (React Redux UI), `shared/` (documentation), and `Automation_booking/` (Playwright E2E tests). The application demonstrates cinema seat selection, availability synchronization, and double-booking prevention patterns.
+**TicketsVenue** is a full-stack movie booking application with a monorepo structure containing `backend/` (Express.js API), `frontend/` (React Redux UI), `shared/` (documentation), and `Automation_booking/` (Playwright E2E tests). The application demonstrates cinema seat selection, availability synchronization, and double-booking prevention patterns.
 
 ## Quick Start
 

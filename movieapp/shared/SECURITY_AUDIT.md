@@ -1,4 +1,4 @@
-# ShowGlow Movie Booking - Security Audit Report
+# TicketsVenue Movie Booking - Security Audit Report
 **Date**: February 26, 2026  
 **Status**: Educational Application (Not Production-Ready)
 
@@ -7,7 +7,7 @@
 ## Executive Summary
 **Overall Risk Level**: MEDIUM (Acceptable for educational demo, not for production)
 
-The ShowGlow application demonstrates several security best practices alongside areas requiring hardening for production deployment. This audit covers:
+The TicketsVenue application demonstrates several security best practices alongside areas requiring hardening for production deployment. This audit covers:
 - iFrame security (YouTube, Stripe)
 - CORS configuration
 - Input validation & output encoding
@@ -354,7 +354,7 @@ Web Components use Shadow DOM which:
 
 ## 8. CONCLUSION
 
-ShowGlow demonstrates **solid foundational security practices** for an educational application:
+TicketsVenue demonstrates **solid foundational security practices** for an educational application:
 - ✅ Web Components with Shadow DOM encapsulation
 - ✅ Proper iFrame sandboxing
 - ✅ HTML output encoding

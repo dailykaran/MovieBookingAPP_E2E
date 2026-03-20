@@ -522,7 +522,7 @@ const PaymentPage: React.FC = () => {
                   startIcon={<DownloadIcon />}
                   onClick={() => {
                     const receiptText = `
-SHOWGLOW CINEMA - BOOKING RECEIPT
+TICKETSVENUE CINEMA - BOOKING RECEIPT
 ===================================
 
 Booking Code: ${bookingCode}
@@ -553,7 +553,7 @@ Thank you for your booking!
 
                     const element = document.createElement('a');
                     element.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(receiptText));
-                    element.setAttribute('download', `ShowGlow_Receipt_${bookingCode}.txt`);
+                    element.setAttribute('download', `TicketsVenue_Receipt_${bookingCode}.txt`);
                     element.style.display = 'none';
                     document.body.appendChild(element);
                     element.click();
