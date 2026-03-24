@@ -14,10 +14,11 @@ Set `requiresApproval: true` unconditionally for this failure class.
 ## Actual Value Observed
 `{{ACTUAL_VALUE}}`
 
-## Application Changelog (if available)
-```
-{{CHANGELOG_CONTEXT}}
-```
+## Test File
+{{TEST_FILE}}
+
+## Test Name
+{{TEST_NAME}}
 
 ## Instructions
 
@@ -56,11 +57,11 @@ Set `requiresApproval: true` unconditionally for this failure class.
   "explanation": "Test expected 'Login successful' but got 'Welcome back'. Changelog shows UI copy update in v2.1.0. Recommend manually verifying copy matches design specs, then updating assertion.",
   "patches": [
     {
-      "file": "tests/auth.spec.ts",
-      "lineStart": 42,
-      "lineEnd": 42,
-      "original": "await expect(page.locator('body')).toContainText('Login successful');",
-      "replacement": "await expect(page.locator('body')).toContainText('Welcome back');",
+      "file": "{{TEST_FILE}}",
+      "lineStart": 9,
+      "lineEnd": 9,
+      "original": "expect(await pageCount).toEqual(999); // Intentionally wrong to trigger healing",
+      "replacement": "expect(await pageCount).toEqual(8); // Intentionally wrong to trigger healing",
       "patchType": "ASSERTION"
     }
   ],

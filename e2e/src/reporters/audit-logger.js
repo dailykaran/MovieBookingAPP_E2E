@@ -15,7 +15,7 @@ if (!existsSync(artifactDir)) {
  * Winston console logger
  */
 export const consoleLogger = createLogger({
-  level: 'info',
+  level: 'debug',
   format: format.combine(
     format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
     format.colorize(),
@@ -82,6 +82,12 @@ export class AuditLogger {
       event: 'PENDING_APPROVAL',
       confidence: proposal.confidence,
       failureClass: proposal.failureClass,
+      explanation: proposal.explanation || '',
+      patches: (proposal.patches || []).slice(0, 10), // Limit to first 10 for audit
+      requiresApproval: proposal.requiresApproval,
+      retryStrategy: proposal.retryStrategy,
+      // Store full response for debugging if needed
+      fullResponse: JSON.stringify(proposal).substring(0, 2000),
     });
   }
 

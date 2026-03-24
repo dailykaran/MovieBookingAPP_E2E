@@ -1,7 +1,7 @@
 {
   "name": "self-healing-e2e",
   "version": "1.0.0",
-  "description": "Self-healing E2E test system powered by Gemini 2.5 Flash / Gemini 3 Pro + Vertex AI Agent",
+  "description": "Self-healing E2E test system powered by Gemini 2.5 Pro + Vertex AI",
   "main": "src/index.js",
   "type": "module",
   "engines": {
@@ -9,12 +9,18 @@
   },
   "scripts": {
     "start": "node src/index.js",
-    "heal:watch": "node src/watcher.js",
+    "heal:manual": "node src/manual-heal.js",
+    "heal:batch": "node src/batch-heal.js",
+    "heal:approve": "node src/heal-approver.js",
+    "grant-access": "node scripts/grant-full-access.js",
+    "revoke-access": "rm -f .healer-permissions.json && echo '✅ Full access revoked'",
     "test": "playwright test",
-    "test:unit": "vitest run",
     "test:debug": "playwright test --debug --headed",
     "audit:review": "node src/audit-viewer.js",
-    "validate:env": "node src/validate-env.js"
+    "validate:env": "node src/validate-env.js",
+    "setup:iam": "node setup-gcloud.js",
+    "setup:gcloud": "node setup-gcloud.js",
+    "diagnose:permissions": "node diagnose-permissions.js"
   },
   "keywords": [
     "playwright",
@@ -26,8 +32,8 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@google-cloud/vertexai": "^1.7.0",
     "@google-cloud/aiplatform": "^3.22.0",
+    "@google-cloud/vertexai": "^1.7.0",
     "@google/generative-ai": "^0.3.1",
     "@playwright/test": "^1.56.1",
     "adm-zip": "^0.5.16",
@@ -40,6 +46,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.10.1",
+    "googleapis": "^171.4.0",
     "vitest": "^2.0.0"
   }
 }

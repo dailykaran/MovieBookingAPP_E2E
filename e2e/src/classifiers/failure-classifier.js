@@ -7,10 +7,12 @@ const CLASSIFICATION_RULES = [
       /locator\(\s*['"](.+)['"]\s*\).*strict mode/i,
       /unable to find element/i,
       /no element found for selector/i,
+      /element\(s\) not found/i,  // Added this pattern
       /element not found/i,
       /getByRole.*not found/i,
       /locator\.evaluate/i,
       /failed to find element/i,
+      /waiting for locator.*first\(\)/i,  // Added for first() selectors
     ],
   },
   {
@@ -27,12 +29,17 @@ const CLASSIFICATION_RULES = [
   {
     class: 'ASSERTION_DRIFT',
     patterns: [
+      /expect\(page\)\.toHaveURL/i,  // URL assertions
+      /Expected:.*Received:/is,  // "Expected: X" followed by "Received: Y" (multiline)
+      /Expected:.+?Received:/is,  // More flexible multiline match
       /expect.*received/i,
       /toEqual.*failed/i,
       /toHaveText.*failed/i,
       /assertion failed/i,
       /toBe.*failed/i,
       /toContain.*failed/i,
+      /tohaveurl/i,
+      /expected.*received/i,
     ],
   },
   {
@@ -72,7 +79,12 @@ const CLASSIFICATION_RULES = [
  */
 export class FailureClassifier {
   classify(event) {
-    const text = `${event.errorMessage ?? ''} ${event.stackTrace ?? ''}`.toLowerCase();
+    // If we have extracted expected and actual values, it's likely ASSERTION_DRIFT
+    if (event.expectedValue && event.actualValue) {
+      return 'ASSERTION_DRIFT';
+    }
+    
+    const text = `${event.errorMessage ?? ''} ${event.stackTrace ?? ''} ${event.assertionCode ?? ''}`.toLowerCase();
 
     for (const rule of CLASSIFICATION_RULES) {
       if (rule.patterns.some(p => p.test(text))) {

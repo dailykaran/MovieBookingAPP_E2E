@@ -1,0 +1,26 @@
+{
+  "version": "1.0",
+  "approvalGate": {
+    "enabled": false,
+    "description": "FULL ACCESS: All healing proposals auto-approved for .spec.ts files",
+    "grantedAt": "2026-03-22T09:01:35.480Z"
+  },
+  "scope": {
+    "filePatterns": [
+      "tests/**/*.spec.ts"
+    ],
+    "allowAutoApply": true,
+    "requiredConfidence": 0,
+    "autoApproveAllFailureTypes": true
+  },
+  "security": {
+    "auditTrailRequired": true,
+    "auditPath": "artifacts/heal-audit.jsonl",
+    "backupOriginals": true
+  },
+  "metadata": {
+    "grantedBy": "User",
+    "fullAccessLevel": "UNRESTRICTED",
+    "comment": "User has full permission for all healing operations on test files"
+  }
+}
