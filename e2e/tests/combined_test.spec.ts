@@ -1,5 +1,4 @@
 import { test, expect } from '@playwright/test';
-import { log } from 'node:console';
 
 
 test('Movie cards are visible and actionable( focus)', async ({ page }) => {

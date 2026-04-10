@@ -1032,6 +1032,11 @@ function extractTestInfo(spec) {
   // NEW: Classify error type using intelligent detection (CRITICAL FIX)
   const classifiedType = classifyErrorType(error);
 
+  console.log(`%c "Extracted Error:" ${error}`, 'color: #ff4500da; font-weight: bold;');
+  console.log(`%c "Classified Error Type:" ${classifiedType}`, 'color: #1e90ffda; font-weight: bold;');
+  console.log(`%c "Error Context:" ${json.stringify(errorContext)}`, 'color: #1e90ffda; font-weight: bold;');
+  console.log(`%c "Error Type:" ${errorType}`, 'color: #ff4500da; font-weight: bold;');
+
   return { error, errorType, classifiedType, errorContext };
 }
 
@@ -1138,6 +1143,7 @@ function sanitizeForPrompt(input, maxLength = 5000) {
     sanitized += `\n[... ${input.length - maxLength} characters truncated for token limit]`;
   }
   
+  console.log(`%c "sanitizeForPrompt:" ${sanitized}`, 'color: #ff8c00da; font-weight: bold;');
   return sanitized;
 }
 
@@ -1171,6 +1177,7 @@ function sanitizeErrorMessage(error, maxLength = 1000) {
   // Remove port numbers that might reveal infrastructure
   sanitized = sanitized.replace(/localhost:\d{4,5}/g, 'localhost:[PORT]');
   
+  console.log(`%c "sanitizeErrorMessage:" ${sanitized}`, 'color: #ff8c00da; font-weight: bold;');
   return sanitized;
 }
 
@@ -1348,6 +1355,7 @@ function generateSelectorGuidance(testCode) {
   guidance += `4. **Last resort**: Use data-testid attributes if available\n`;
   guidance += `5. **Avoid**: Class-based selectors (.Mui*) that break on version changes\n`;
 
+  console.log(`%c "Generated Selector Guidance:" ${guidance}`, 'color: #ff8c00da; font-weight: bold;');
   return guidance;
 }
 
@@ -1492,6 +1500,7 @@ function generateDOMArchitectureGuidance(domIssues) {
     });
   }
 
+  console.log(`%c "Generated DOM Architecture Guidance:" ${guidance}`, 'color: #ff8c00da; font-weight: bold;');
   return guidance;
 }
 
@@ -1717,6 +1726,7 @@ Or use data-testid if available:
 ${traceElements.buttons.filter(b => b.testId).map(btn => `  - getByTestId('${btn.testId}')`).join('\n') || '  (no testIds found)'}
 `;
   
+  console.log(`%c "Generated Button Text Guidance:" ${guidance}`, 'color: #ff8c00da; font-weight: bold;');
   return guidance;
 }
 
@@ -2287,6 +2297,7 @@ function generateAnalysisPrompt(testInfo, testCode) {
   if (tracePath) {
     console.log('🔍 Analyzing Playwright trace for element information...');
     traceElements = extractElementsFromTrace(tracePath);
+    console.log(`📋 Trace analysis results: ${traceElements.buttons.length} buttons, ${traceElements.inputs.length} inputs, ${traceElements.dialogs.length} dialogs extracted.`);
   }
   
   // Validate test code size
@@ -2373,6 +2384,7 @@ Examples of corrections:
 
 **RULE**: Always use labels that exist in the source code list above. Never create new label names.
 `;
+ console.log(`%c "uiElementContext:" ${uiElementContext}`, 'color: #ff8c00da; font-weight: bold;');
   }
 
   // NEW: Build behavioral change guidance
@@ -2453,6 +2465,7 @@ ${fixSuggestion.actions.map(a => `- ${a}`).join('\n')}
 5. **Maintain test intent** - don't silently accept broken behavior
 6. **If unsure**: Include both analysis and suggest manual review
 `;
+console.log(`%c "behavioralGuidance in blue color text:" ${behavioralGuidance}`, 'color: #1e80ffe5; font-weight: bold;');
   }
 
   return `You are an expert Playwright test automation engineer specializing in:

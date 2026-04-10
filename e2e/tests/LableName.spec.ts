@@ -15,7 +15,9 @@ test('Verify label names on user details page', async ({ page }) => {
 
   await seats.first().waitFor({ state: 'visible' }); // Ensures seats are rendered
   const seatCount = await seats.count();
-  console.log(`Available seats found: ${seatCount}`); // Keep for debugging if needed
+  
+  
+  console.log(`Available seats found: ${seatCount}`); 
   if (seatCount > 0) {
     await seats.first().click();
   } else {

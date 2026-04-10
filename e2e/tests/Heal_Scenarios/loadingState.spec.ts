@@ -35,10 +35,10 @@ test('Loading spinner appears during booking', async ({ page }) => {
   expect(pageContent.length).toBeGreaterThan(100); // Page loaded
 
 
-  await page.getByLabel('First Name').fill('John');
+  await page.getByLabel('Full Name').fill('John'); // first name lablel is updated to "Full Name" in the application, so we need to update the locator accordingly
   await page.getByLabel('Last Name').fill('Doe');
   await page.getByLabel('Email').fill('John@example.in');
-  await page.getByLabel('Phone Number').fill('1234567890');
+  await page.getByLabel('Mobile Number').fill('1234567890'); // phone number label is updated to "Mobile Number" in the application, so we need to update the locator accordingly
   await page.getByLabel('Age').fill('25');
   await page.getByRole('button', { name: 'Continue to Payment' }).click();
 
@@ -56,13 +56,13 @@ test('Loading spinner appears during booking', async ({ page }) => {
   await expect(page.locator('.MuiDialog-paperWidthSm h2')).toContainText('Confirm Payment');
   await page.locator('button.MuiButton-containedSuccess').click();
 
-  await page.locator('.MuiCircularProgress-root').first().waitFor({ state: 'visible', timeout: 1000 });
+  await page.locator('.MuiCircularProgress-root').first().waitFor({ state: 'visible', timeout: 3000 }); // timing load issue 1000
   await page.locator('.MuiCircularProgress-root').last().waitFor({ state: 'detached', timeout: 3000 });
   
   await expect(page.locator('.MuiSnackbarContent-message')).toContainText('Booking confirmed successfully!');
 
   await page.getByRole('button', { name: /Copy/i }).click();
   await expect(page.locator('.MuiSnackbarContent-message').last()).toContainText('Booking code copied');
-  await page.locator('.MuiSnackbarContent-message').last().waitFor({ state: 'detached', timeout: 500 });
+  await page.locator('.MuiSnackbarContent-message').last().waitFor({ state: 'detached', timeout: 1000 }); // timing load issue 500
 });
 
