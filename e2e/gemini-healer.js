@@ -1034,7 +1034,7 @@ function extractTestInfo(spec) {
 
   console.log(`%c "Extracted Error:" ${error}`, 'color: #ff4500da; font-weight: bold;');
   console.log(`%c "Classified Error Type:" ${classifiedType}`, 'color: #1e90ffda; font-weight: bold;');
-  console.log(`%c "Error Context:" ${json.stringify(errorContext)}`, 'color: #1e90ffda; font-weight: bold;');
+  console.log(`%c "Error Context:" ${JSON.stringify(errorContext)}`, 'color: #1e90ffda; font-weight: bold;');
   console.log(`%c "Error Type:" ${errorType}`, 'color: #ff4500da; font-weight: bold;');
 
   return { error, errorType, classifiedType, errorContext };

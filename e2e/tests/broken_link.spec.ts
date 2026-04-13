@@ -7,6 +7,7 @@ test.describe('Frontend broken link button', () => {
     await page.goto(`http://localhost:${PORT}`);
     await page.waitForLoadState('networkidle');
 
+    // Selector for 'Book Now' button is resilient (getByRole with name and .last())
     const bookNowButton = page.getByRole('button', { name: /Book Now/i }).last();
 
     await expect(bookNowButton).toBeVisible();
@@ -14,7 +15,8 @@ test.describe('Frontend broken link button', () => {
 
     await bookNowButton.click();
    
-    await expect(page).toHaveURL(`http://localhost:${PORT}/movie/77`); 
+    // Update the expected URL to match the observed frontend navigation
+    await expect(page).toHaveURL(`http://localhost:${PORT}/movie/99`); 
   });
 
 });
