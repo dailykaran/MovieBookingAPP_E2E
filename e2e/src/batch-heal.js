@@ -33,13 +33,19 @@ function parseArgs(argv) {
   for (let i = 2; i < argv.length; i++) {
     if (argv[i] === '--all') {
       args.all = true;
-    } else if (argv[i] === '--skipApproval') {
+    } else if (argv[i] === '--skipApproval' || argv[i] === '--skipapproval') {
       args.skipApproval = true;
     } else if (argv[i].startsWith('--')) {
       const key = argv[i].substring(2);
       const value = argv[i + 1];
       if (value && !value.startsWith('--')) {
-        args[key] = value;
+        // Normalize lowercase keys to camelCase (npm lowercases all arg names)
+        let normalizedKey = key;
+        if (key === 'testfile') normalizedKey = 'testFile';
+        if (key === 'testname') normalizedKey = 'testName';
+        if (key === 'skipapproval') normalizedKey = 'skipApproval';
+        
+        args[normalizedKey] = value;
         i++;
       }
     }

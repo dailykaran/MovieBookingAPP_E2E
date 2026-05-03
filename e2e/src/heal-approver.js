@@ -23,13 +23,13 @@ const args = process.argv.slice(2);
 let healingId = null;
 
 // Handle both formats: --healingId ID or just ID
-if (args.length === 1) {
+if (args.length === 1 && !args[0].startsWith('--')) {
   // Direct ID passed: npm run heal:approve -- ID
   healingId = args[0];
 } else if (args.length >= 2) {
-  // --healingId flag format
+  // --healingId flag format (also handle npm's lowercase variant --healingid)
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--healingId' && i + 1 < args.length) {
+    if ((args[i] === '--healingId' || args[i] === '--healingid') && i + 1 < args.length) {
       healingId = args[i + 1];
       break;
     }

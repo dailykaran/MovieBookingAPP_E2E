@@ -14,11 +14,21 @@ Set `requiresApproval: true` unconditionally for this failure class.
 ## Actual Value Observed
 `{{ACTUAL_VALUE}}`
 
+## Error Message
+```
+{{ERROR_MESSAGE}}
+```
+
 ## Test File
 {{TEST_FILE}}
 
 ## Test Name
 {{TEST_NAME}}
+
+## Full Test Code
+```typescript
+{{FAILED_TEST_CODE}}
+```
 
 ## Instructions
 

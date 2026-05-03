@@ -54,8 +54,16 @@ export class PatchApplicator {
         };
       }
 
-      // 1. Read original file
-      const originalContent = readFileSync(filePath, 'utf8');
+      // 1. Read original file and detect line ending style
+      let originalContent = readFileSync(filePath, 'utf8');
+      const hasWindowsLineEndings = originalContent.includes('\r\n');
+      
+      // Normalize to LF for processing
+      originalContent = originalContent.replace(/\r\n/g, '\n');
+
+      // Normalize patch input as well
+      const normalizedPatchOriginal = patch.original.replace(/\r\n/g, '\n');
+      const normalizedPatchReplacement = patch.replacement.replace(/\r\n/g, '\n');
 
       // 2. Skip syntax validation for now (security validator handles safety)
       // const syntaxCheck = this.#validateSyntax(patch.replacement);
@@ -75,21 +83,21 @@ export class PatchApplicator {
       let matchFound = false;
       let patchedContent = originalContent;
 
-      // Strategy 1: Exact match
-      if (originalContent.includes(patch.original)) {
+      // Strategy 1: Exact match (using normalized strings)
+      if (originalContent.includes(normalizedPatchOriginal)) {
         matchFound = true;
-        patchedContent = originalContent.replace(patch.original, patch.replacement);
+        patchedContent = originalContent.replace(normalizedPatchOriginal, normalizedPatchReplacement);
       } 
       // Strategy 2: Fuzzy match on the first logical line
-      else if (contentBetweenLines.includes(patch.original.trim())) {
+      else if (contentBetweenLines.includes(normalizedPatchOriginal.trim())) {
         matchFound = true;
         // Find and replace the trimmed version, preserving surrounding whitespace
-        const re = new RegExp(patch.original.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
-        patchedContent = originalContent.replace(re, patch.replacement);
+        const re = new RegExp(normalizedPatchOriginal.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+        patchedContent = originalContent.replace(re, normalizedPatchReplacement);
       }
       // Strategy 3: Normalize whitespace and try again
       else {
-        const normalizedOriginal = patch.original.split('\n').map(l => l.trim()).join('\n');
+        const normalizedOriginal = normalizedPatchOriginal.split('\n').map(l => l.trim()).join('\n');
         const normalizedContent = contentBetweenLines.split('\n').map(l => l.trim()).join('\n');
         if (normalizedContent.includes(normalizedOriginal)) {
           matchFound = true;
@@ -97,27 +105,27 @@ export class PatchApplicator {
           const escapedPattern = normalizedOriginal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
           const flexPattern = escapedPattern.replace(/\s+/g, '\\s+');
           const re = new RegExp(flexPattern, 'g');
-          patchedContent = originalContent.replace(re, patch.replacement);
+          patchedContent = originalContent.replace(re, normalizedPatchReplacement);
         }
       }
       // Strategy 4: Try without async/await keywords (common AI variation)
       if (!matchFound) {
-        const withoutAsync = patch.original.replace(/\b(await|async)\s+/g, '').trim();
+        const withoutAsync = normalizedPatchOriginal.replace(/\b(await|async)\s+/g, '').trim();
         if (originalContent.includes(withoutAsync)) {
           matchFound = true;
-          patchedContent = originalContent.replace(withoutAsync, patch.replacement.replace(/\b(await|async)\s+/g, '').trim());
+          patchedContent = originalContent.replace(withoutAsync, normalizedPatchReplacement.replace(/\b(await|async)\s+/g, '').trim());
         }
       }
       // Strategy 5: Partial match - find the first line and try to replace that line
       if (!matchFound) {
-        const originalFirstLine = patch.original.trim().split('\n')[0];
+        const originalFirstLine = normalizedPatchOriginal.trim().split('\n')[0];
         const lines = originalContent.split('\n');
         for (let i = Math.max(0, patch.lineStart - 3); i < Math.min(lines.length, patch.lineEnd + 3); i++) {
           const line = lines[i].trim();
           if (line.length > 10 && originalFirstLine.includes(line.substring(0, Math.min(line.length, 20)))) {
             matchFound = true;
             // Replace this entire logical block
-            const replacementFirstLine = patch.replacement.trim().split('\n')[0];
+            const replacementFirstLine = normalizedPatchReplacement.trim().split('\n')[0];
             lines[i] = lines[i].replace(line, replacementFirstLine);
             patchedContent = lines.join('\n');
             break;
@@ -126,7 +134,7 @@ export class PatchApplicator {
       }
       // Strategy 6: Try fuzzy line matching (for the specific case where we need to find and replace whole statements)
       if (!matchFound && patch.lineStart && patch.lineEnd) {
-        const originalLines = patch.original.split('\n');
+        const originalLines = normalizedPatchOriginal.split('\n');
         const firstOriginalLine = originalLines[0].trim();
         const fileLines = originalContent.split('\n');
         
@@ -135,7 +143,7 @@ export class PatchApplicator {
           if (i >= 0 && fileLines[i].toLowerCase().includes(firstOriginalLine.toLowerCase().substring(0, 30))) {
             matchFound = true;
             // Replace the line range
-            fileLines.splice(patch.lineStart - 1, patch.lineEnd - patch.lineStart + 1, patch.replacement);
+            fileLines.splice(patch.lineStart - 1, patch.lineEnd - patch.lineStart + 1, normalizedPatchReplacement);
             patchedContent = fileLines.join('\n');
             break;
           }
@@ -172,8 +180,12 @@ export class PatchApplicator {
       }
       writeFileSync(backupPath, originalContent);
 
-      // 6. Write patched file
-      writeFileSync(filePath, patchedContent);
+      // 6. Write patched file (restore original line ending style)
+      let finalContent = patchedContent;
+      if (hasWindowsLineEndings) {
+        finalContent = finalContent.replace(/\n/g, '\r\n');
+      }
+      writeFileSync(filePath, finalContent);
 
       return {
         success: true,

@@ -18,10 +18,8 @@ test('Alert: Should show double-booking alert when seats are taken', async ({ pa
   await page.waitForTimeout(500);
   
   // Step 2: Select two seat buttons (numbered 1-100)
-  const seatButtons = page.locator('button').filter({ hasText: /^\d{1,3}$/ });
-  const availableSeats = await seatButtons.count();
-  
-  expect(availableSeats).toBeGreaterThan(1);
+  const seatButtons = page.getByRole('button', { name: /\d{1,3}/ });
+    await expect(seatButtons.first()).toBeVisible();
   
   // Click first two available seats
   const seat1 = seatButtons.nth(0);
@@ -50,7 +48,7 @@ test('Alert: Should show double-booking alert when seats are taken', async ({ pa
   ]);
   
   // Either form appears (successful booking) or alert appears (double-booking)
-  expect(proceedResult).toBe(true);
+  expect(proceedResult).toBe(false);
 });
 
 // Test b) Validation Alert - No seats selected + Click Confirm

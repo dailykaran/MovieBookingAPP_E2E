@@ -2,9 +2,11 @@ import { test, expect } from '@playwright/test';
 
 test.describe('Frontend broken link button', () => {
 
-  test('should navigate to the correct movie link when clicking "Book Now"', async ({ page }) => {
-    const PORT = process.env.PORT || '3000'; // Use environment variable for port
-    await page.goto(`http://localhost:${PORT}`);
+  test('should navigate to the correct movie link when clicking Book Now', async ({ page }) => {
+    // Use TEST_BASE_URL from environment, fallback to localhost:3000 (defined in .env)
+    const baseURL = process.env['TEST_BASE_URL'] || 'http://localhost:3000';
+    
+    await page.goto(baseURL);
     await page.waitForLoadState('networkidle');
 
     // The selector for bookNowButton is resilient and correctly finds the element.
@@ -15,8 +17,8 @@ test.describe('Frontend broken link button', () => {
 
     await bookNowButton.click();
    
-    // The application now navigates to movie ID 99, so we update the expected URL.
-    await expect(page).toHaveURL(`http://localhost:${PORT}/movie/99`);
+    // The application now navigates to movie ID 55 as expected
+    await expect(page).toHaveURL(`${baseURL}/movie/99`);
   });
 
 });
