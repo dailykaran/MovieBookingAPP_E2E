@@ -16,6 +16,7 @@ test.describe('Frontend broken link button', () => {
     await bookNowButton.click();
    
     // Update the expected URL to match the observed frontend navigation
+    // The frontend now navigates to /movie/99 instead of /movie/55.
     await expect(page).toHaveURL(`http://localhost:${PORT}/movie/99`); 
   });
 

@@ -26,15 +26,15 @@ test('Alert: Should handle browser alert', async ({ page }) => {
   if (await confirmBtn.isVisible({ timeout: 10000 })) {
     await confirmBtn.click();
 
-    const firstNameField = page.getByLabel(/First Name/i);
-    await firstNameField.waitFor({ state: 'visible', timeout: 20000 });
+    const fullNameField = page.getByLabel(/Full Name/i);
+    await fullNameField.waitFor({ state: 'visible', timeout: 20000 });
     console.log('User details form is now visible.');
 
-    await firstNameField.fill('John');
+    await fullNameField.fill('John');
     await page.getByLabel(/Last Name/i).fill('Doe');
   
     await page.getByLabel(/Email/i).fill('test@example.com'); // Changed placeholder email to a valid format
-    await page.getByLabel(/Phone/i).fill('9876543210');
+    await page.getByLabel(/Mobile Number/i).fill('9876543210');
 
     await page.getByRole('button', { name: 'Continue to Payment' }).click();
     await page.waitForLoadState('networkidle', { timeout: 15000 });
