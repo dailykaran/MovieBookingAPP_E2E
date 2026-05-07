@@ -8,7 +8,10 @@
 node_modules/
 /test-results/
 /playwright-report/
+/reports/
+/test-results/
 /blob-report/
+/.playwright-mcp/
 /playwright/.cache/
 /playwright/.auth/
 /.healer-audit.log/

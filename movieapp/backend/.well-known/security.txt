@@ -1,0 +1,15 @@
+Contact: security@showglow.com
+Expires: 2026-12-31T23:59:59Z
+Preferred-Languages: en
+Canonical: https://www.showglow.com/.well-known/security.txt
+
+# Security Disclosure Policy
+# For security issues, please DO NOT open a public GitHub issue.
+# Please email security@showglow.com with:
+# 1. Description of the vulnerability
+# 2. Steps to reproduce
+# 3. Potential impact
+# 4. Suggested remediation (if available)
+
+# We aim to respond within 48 hours and provide updates every 7 days.
+# Public disclosure will be coordinated with you.
