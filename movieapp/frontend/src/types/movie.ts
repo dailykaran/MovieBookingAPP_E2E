@@ -10,6 +10,7 @@ export interface Movie {
   description: string;
   duration: number;
   price: number;
+  trailerUrl: string;
   showtimes: string[];
   showtimeSeats: ShowtimeSeats[];
 }

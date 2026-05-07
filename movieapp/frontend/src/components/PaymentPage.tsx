@@ -17,9 +17,15 @@ import {
   Alert,
   Fade,
   Divider,
-  CircularProgress
+  CircularProgress,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  Snackbar,
 } from '@mui/material';
 import { styled } from '@mui/material/styles';
+import { Download as DownloadIcon, FileCopy as CopyIcon } from '@mui/icons-material';
 
 interface PaymentInfo {
   cardNumber: string;
@@ -71,6 +77,28 @@ const PaymentPage: React.FC = () => {
     cvv: ''
   });
 
+  // Feature 1.2: Success toast notification state
+  const [bookingSuccess, setBookingSuccess] = useState(false);
+  const [bookingCode, setBookingCode] = useState('');
+
+  // Feature 1.4: Loading progress states
+  const [loadingStep, setLoadingStep] = useState(0);
+
+  // Feature 2.4: Copy to clipboard feedback state
+  const [copyFeedback, setCopyFeedback] = useState(false);
+
+  // Feature 1.3: Payment validation warning dialog state
+  const [validationWarnings, setValidationWarnings] = useState<string[]>([]);
+  const [showValidationDialog, setShowValidationDialog] = useState(false);
+
+  // Feature 1.3: Payment confirmation dialog state
+  const [showConfirmationDialog, setShowConfirmationDialog] = useState(false);
+  const [paymentError, setPaymentError] = useState<string>('');
+  const [showPaymentErrorDialog, setShowPaymentErrorDialog] = useState(false);
+
+  // Delayed CircularProgress visibility
+  const [showLoading, setShowLoading] = useState(false);
+
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     let formattedValue = value;
@@ -105,26 +133,138 @@ const PaymentPage: React.FC = () => {
   };
 
   const handlePayment = async () => {
-    setIsProcessing(true);
-    try {
-      // Sync booked seats to backend with showtime
-      if (bookingDetails.movieId && bookingDetails.showtime) {
-        await dispatch(updateMovieSeats({
-          movieId: bookingDetails.movieId,
-          bookedSeats: bookingDetails.selectedSeats,
-          showtime: bookingDetails.showtime
-        })).unwrap();
-      }
+    // Feature 1.3: Check for validation warnings first
+    const warnings: string[] = [];
+    
+    if (paymentInfo.cardNumber.replace(/\s/g, '').length !== 16) {
+      warnings.push('Card number must be exactly 16 digits');
+    }
+    if (paymentInfo.cardHolder.trim().length < 3) {
+      warnings.push('Card holder name must be at least 3 characters');
+    }
+    if (!/^(0[1-9]|1[0-2])\/([0-9]{2})$/.test(paymentInfo.expiryDate)) {
+      warnings.push('Expiry date must be in MM/YY format');
+    }
+    if (!/^[0-9]{3}$/.test(paymentInfo.cvv)) {
+      warnings.push('CVV must be exactly 3 digits');
+    }
 
-      // Simulate payment processing
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      setActiveStep(2);
-    } catch (error) {
-      alert(`Failed to process booking: ${error instanceof Error ? error.message : 'Unknown error'}`);
-      setIsProcessing(false);
+    // If there are validation warnings, show dialog
+    if (warnings.length > 0) {
+      setValidationWarnings(warnings);
+      setShowValidationDialog(true);
       return;
     }
-    setIsProcessing(false);
+
+    // Feature 1.3: Show confirmation dialog before payment
+    setShowConfirmationDialog(true);
+  };
+
+  // Feature 1.3: Handle confirmed payment
+  const handleConfirmedPayment = async () => {
+    setShowConfirmationDialog(false);
+    await processPayment();
+  };
+
+  // Feature 1.3: Process the actual payment
+  const processPayment = async () => {
+        
+    setIsProcessing(true);
+    setLoadingStep(0);
+    setPaymentError('');
+    setShowLoading(false);
+
+    // Wait 1 second before showing the spinner
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    setShowLoading(true);
+
+    try {
+      // Feature 1.4: Update progress - Step 1: Validating
+      setLoadingStep(1);
+      await new Promise(resolve => setTimeout(resolve, 800)); 
+
+      // Feature 1.4: Update progress - Step 2: Processing Payment
+      setLoadingStep(2);
+      //await new Promise(resolve => setTimeout(resolve, 800)); 
+      // Call local payment processing endpoint
+      const cardDigits = paymentInfo.cardNumber.replace(/\s/g, '');
+      const paymentResponse = await fetch('http://localhost:5000/api/payments/process', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          amount: bookingDetails.totalAmount,
+          currency: 'inr',
+          cardNumber: cardDigits,
+          cardHolder: paymentInfo.cardHolder,
+          expiryDate: paymentInfo.expiryDate,
+          cvv: paymentInfo.cvv,
+          movieId: bookingDetails.movieId,
+          seats: bookingDetails.selectedSeats.join(','),
+          showtime: bookingDetails.showtime,
+          userEmail: bookingDetails.userDetails.email
+        })
+      });
+
+      if (!paymentResponse.ok) {
+        const errorData = await paymentResponse.json();
+        throw new Error(errorData.message || 'Payment processing failed');
+      }
+
+      const paymentData = await paymentResponse.json();
+
+      if (!paymentData.success) {
+        throw new Error(paymentData.message || 'Payment was declined');
+      }
+
+      // Sync booked seats to backend with showtime
+      if (bookingDetails.movieId && bookingDetails.showtime) {
+        try {
+          await dispatch(updateMovieSeats({
+            movieId: bookingDetails.movieId,
+            bookedSeats: bookingDetails.selectedSeats,
+            showtime: bookingDetails.showtime
+          })).unwrap();
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : 'Failed to process booking';
+          setPaymentError(errorMsg);
+          
+          // Delay before hiding spinner on error (4 seconds hold)
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          setShowLoading(false);
+          
+          setShowPaymentErrorDialog(true);
+          setIsProcessing(false);
+          return;
+        }
+      }
+
+      // Feature 1.4: Update progress - Step 3: Confirming
+      setLoadingStep(3);
+      await new Promise(resolve => setTimeout(resolve, 800));
+
+      // Delay before hiding spinner (4 seconds hold)
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      setShowLoading(false);
+
+      // Feature 1.2: Generate booking code
+      const code = `BK${Date.now().toString().slice(-8)}`;
+      setBookingCode(code);
+      setBookingSuccess(true);
+      setActiveStep(2);
+      setIsProcessing(false);
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Payment processing failed';
+      setPaymentError(errorMsg);
+      
+      // Delay before hiding spinner on error (4 seconds hold)
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      setShowLoading(false);
+      
+      setShowPaymentErrorDialog(true);
+      setIsProcessing(false);
+    }
   };
 
   const isFormValid = () => {
@@ -210,7 +350,7 @@ const PaymentPage: React.FC = () => {
                     <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
                       <Typography variant="h6">Total Amount:</Typography>
                       <Typography variant="h6" fontWeight="bold">
-                        ${bookingDetails.totalAmount.toFixed(2)}
+                        ₹{bookingDetails.totalAmount}
                       </Typography>
                     </Box>
                   </Stack>
@@ -227,13 +367,13 @@ const PaymentPage: React.FC = () => {
                     inputProps={{ 
                       maxLength: 19,
                       inputMode: 'numeric',
-                      pattern: '[0-9]*'
+                      pattern: '[0-9 ]*'
                     }}
                     error={paymentInfo.cardNumber.length > 0 && paymentInfo.cardNumber.replace(/\s/g, '').length !== 16}
                     helperText={
                       paymentInfo.cardNumber.length > 0 && paymentInfo.cardNumber.replace(/\s/g, '').length !== 16
-                        ? "Please enter a valid 16-digit card number"
-                        : "Enter your 16-digit card number"
+                        ? `Please enter exactly 16 digits (you entered ${paymentInfo.cardNumber.replace(/\s/g, '').length} digits)`
+                        : "Enter 16-digit card number (e.g., 4111 1111 1111 1111)"
                     }
                   />
                   <StyledTextField
@@ -283,35 +423,36 @@ const PaymentPage: React.FC = () => {
                 </Stack>
               </Box>
 
-              <Button
-                variant="contained"
-                color="primary"
-                fullWidth
-                size="large"
-                onClick={handlePayment}
-                disabled={!isFormValid() || isProcessing}
-                sx={{ 
-                  py: 2,
-                  fontSize: '1.1rem',
-                  position: 'relative'
-                }}
-              >
-                {isProcessing ? (
-                  <>
-                    <CircularProgress
-                      size={24}
-                      sx={{
-                        position: 'absolute',
-                        left: '50%',
-                        marginLeft: '-12px'
-                      }}
-                    />
-                    Processing...
-                  </>
-                ) : (
-                  `Pay $${bookingDetails.totalAmount.toFixed(2)}`
-                )}
-              </Button>
+                <Button
+                  variant="contained"
+                  color="primary"
+                  fullWidth
+                  size="large"
+                  onClick={handlePayment}
+                  disabled={!isFormValid() || isProcessing}
+                  sx={{ 
+                    py: 2,
+                    fontSize: '1.1rem',
+                    position: 'relative',
+                    mt: 3
+                  }}
+                >
+                  {showLoading ? (
+                    <>
+                      <CircularProgress
+                        size={24}
+                        sx={{
+                          position: 'absolute',
+                          left: '50%',
+                          marginLeft: '-12px'
+                        }}
+                      />
+                      Processing...
+                    </>
+                  ) : (
+                    `Pay ₹${bookingDetails.totalAmount}`
+                  )}
+                </Button>
             </Box>
           </Fade>
         ) : (
@@ -341,22 +482,238 @@ const PaymentPage: React.FC = () => {
                   <Typography>Email: {bookingDetails.userDetails.email}</Typography>
                   <Typography>Phone: {bookingDetails.userDetails.phone}</Typography>
                   <Typography variant="h6">
-                    Amount Paid: ${bookingDetails.totalAmount.toFixed(2)}
+                    Amount Paid: ₹{bookingDetails.totalAmount}
                   </Typography>
+
+                  {/* Feature 2.4: Booking code display and copy */}
+                  <Box sx={{ 
+                    backgroundColor: 'primary.main', 
+                    color: 'white', 
+                    p: 2, 
+                    borderRadius: 1,
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center'
+                  }}>
+                    <Box>
+                      <Typography variant="caption">Booking Code</Typography>
+                      <Typography variant="h6" fontWeight="bold">{bookingCode}</Typography>
+                    </Box>
+                    <Button
+                      variant="contained"
+                      size="small"
+                      startIcon={<CopyIcon />}
+                      onClick={() => {
+                        navigator.clipboard.writeText(bookingCode);
+                        setCopyFeedback(true);
+                      }}
+                      sx={{ backgroundColor: 'rgba(255,255,255,0.2)', '&:hover': { backgroundColor: 'rgba(255,255,255,0.3)' } }}
+                    >
+                      Copy
+                    </Button>
+                  </Box>
                 </Stack>
               </Paper>
-              <Button
-                variant="contained"
-                color="primary"
-                onClick={() => navigate('/')}
-                sx={{ mt: 2 }}
-              >
-                Back to Home
-              </Button>
+
+              {/* Feature 2.3: Receipt Download Button */}
+              <Stack spacing={2} direction={{ xs: 'column', sm: 'row' }} justifyContent="center" sx={{ mb: 3 }}>
+                <Button
+                  variant="outlined"
+                  startIcon={<DownloadIcon />}
+                  onClick={() => {
+                    const receiptText = `
+TICKETSVENUE CINEMA - BOOKING RECEIPT
+===================================
+
+Booking Code: ${bookingCode}
+Date: ${new Date().toLocaleDateString()}
+
+BOOKING DETAILS
+===============
+Movie: ${bookingDetails.movieTitle}
+Seats: ${bookingDetails.selectedSeats.join(', ')}
+Showtime: ${bookingDetails.showtime}
+
+CUSTOMER DETAILS
+================
+Name: ${bookingDetails.userDetails.firstName} ${bookingDetails.userDetails.lastName}
+Email: ${bookingDetails.userDetails.email}
+Phone: ${bookingDetails.userDetails.phone}
+Age: ${bookingDetails.userDetails.age}
+
+PAYMENT SUMMARY
+===============
+Movie Price (per seat): ₹{Math.round(bookingDetails.totalAmount / bookingDetails.selectedSeats.length)}
+Number of Seats: ${bookingDetails.selectedSeats.length}
+Total Amount: ₹{bookingDetails.totalAmount}
+
+===================================
+Thank you for your booking!
+===================================`;
+
+                    const element = document.createElement('a');
+                    element.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(receiptText));
+                    element.setAttribute('download', `TicketsVenue_Receipt_${bookingCode}.txt`);
+                    element.style.display = 'none';
+                    document.body.appendChild(element);
+                    element.click();
+                    document.body.removeChild(element);
+                  }}
+                >
+                  Download Receipt
+                </Button>
+                <Button
+                  variant="contained"
+                  color="primary"
+                  onClick={() => navigate('/')}
+                >
+                  Back to Home
+                </Button>
+              </Stack>
             </Box>
           </Fade>
         )}
       </Paper>
+
+      {/* Feature 1.3: Payment Validation Warning Dialog */}
+      <Dialog open={showValidationDialog} onClose={() => setShowValidationDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontSize: '1.2rem', fontWeight: 'bold', color: 'warning.main' }}>
+          Payment Validation Warning
+        </DialogTitle>
+        <DialogContent>
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            Please fix the following payment details:
+          </Alert>
+          <Stack spacing={1}>
+            {validationWarnings.map((warning, idx) => (
+              <Box key={idx} sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
+                <Typography sx={{ color: 'warning.main', fontWeight: 'bold' }}>•</Typography>
+                <Typography variant="body2">{warning}</Typography>
+              </Box>
+            ))}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button 
+            onClick={() => setShowValidationDialog(false)} 
+            variant="contained"
+            color="primary"
+          >
+            Understood, Let me Fix
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Feature 1.3: Payment Confirmation Dialog */}
+      <Dialog open={showConfirmationDialog} onClose={() => setShowConfirmationDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontSize: '1.2rem', fontWeight: 'bold' }}>
+          Confirm Payment
+        </DialogTitle>
+        <DialogContent>
+          <Alert severity="info" sx={{ mb: 2 }}>
+            You are about to process a payment. Please confirm the details below:
+          </Alert>
+          <Stack spacing={2}>
+            <Box sx={{ backgroundColor: '#f5f5f5', p: 2, borderRadius: 1 }}>
+              <Typography variant="body2"><strong>Card Number:</strong> ****{paymentInfo.cardNumber.slice(-4)}</Typography>
+              <Typography variant="body2"><strong>Card Holder:</strong> {paymentInfo.cardHolder}</Typography>
+                      <Typography variant="body2"><strong>Amount:</strong> ₹{bookingDetails?.totalAmount || '0'}</Typography>
+            </Box>
+            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+              By clicking 'Confirm Payment', you authorize this transaction.
+            </Typography>
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button 
+            onClick={() => setShowConfirmationDialog(false)} 
+            variant="outlined"
+            color="primary"
+          >
+            Cancel
+          </Button>
+          <Button 
+            onClick={handleConfirmedPayment} 
+            variant="contained"
+            color="success"
+            autoFocus
+          >
+            Confirm Payment
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Feature 1.3: Payment Error Dialog */}
+      <Dialog open={showPaymentErrorDialog} onClose={() => setShowPaymentErrorDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontSize: '1.2rem', fontWeight: 'bold', color: 'error.main' }}>
+          Payment Error
+        </DialogTitle>
+        <DialogContent>
+          <Alert severity="error" sx={{ mb: 2 }}>
+            Payment processing failed. Please try again.
+          </Alert>
+          <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
+            Error Details: {paymentError || 'Unknown error occurred'}
+          </Typography>
+          <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+            Your card has not been charged. Please review the error and try again with valid payment information.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button 
+            onClick={() => setShowPaymentErrorDialog(false)} 
+            variant="contained"
+            color="error"
+            autoFocus
+          >
+            Understood
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Feature 1.4: Loading Progress Dialog with Stepper */}
+      <Dialog open={isProcessing} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontWeight: 'bold' }}>Processing Your Payment</DialogTitle>
+        <DialogContent>
+          <Box sx={{ py: 3 }}>
+            <Stepper activeStep={Math.min(loadingStep, 2)} orientation="vertical">
+              <Step completed={loadingStep > 1}>
+                <StepLabel>Validating Payment Information</StepLabel>
+              </Step>
+              <Step completed={loadingStep > 2}>
+                <StepLabel>Processing Booking</StepLabel>
+              </Step>
+              <Step completed={loadingStep > 3}>
+                <StepLabel>Confirming Reservation</StepLabel>
+              </Step>
+            </Stepper>
+            <Box sx={{ display: 'flex', justifyContent: 'center', mt: 3 }}>
+              {showLoading && <CircularProgress />}
+            </Box>
+            <Typography variant="caption" sx={{ display: 'block', textAlign: 'center', mt: 2, color: 'text.secondary' }}>
+              Please do not close this window...
+            </Typography>
+          </Box>
+        </DialogContent>
+      </Dialog>
+
+      {/* Feature 1.2: Success Toast Notification */}
+      <Snackbar
+        open={bookingSuccess}
+        autoHideDuration={4000}
+        onClose={() => setBookingSuccess(false)}
+        message="Booking confirmed successfully!"
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+      />
+
+      {/* Feature 2.4: Copy Feedback Toast */}
+      <Snackbar
+        open={copyFeedback}
+        autoHideDuration={600}
+        onClose={() => setCopyFeedback(false)}
+        message="Booking code copied to clipboard!"
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+      />
     </Container>
   );
 };

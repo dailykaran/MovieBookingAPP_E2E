@@ -105,13 +105,24 @@ export const updateMovieSeats = (req: Request, res: Response) => {
       return res.status(404).json({ message: 'Movie not found' });
     }
 
-    // Validate that seats array is provided and is an array
+    // 🔒 SECURITY: Validate that seats array is provided and is an array
     if (!Array.isArray(seats)) {
       return res.status(400).json({ message: 'Seats must be an array' });
     }
 
-    if (!showtime) {
-      return res.status(400).json({ message: 'Showtime is required' });
+    // 🔒 SECURITY: Validate seat numbers (1-100 range)
+    if (!seats.every((seat: any) => typeof seat === 'number' && seat >= 1 && seat <= 100)) {
+      return res.status(400).json({ message: 'All seat numbers must be between 1 and 100' });
+    }
+
+    // 🔒 SECURITY: Check for duplicate seat IDs
+    if (new Set(seats).size !== seats.length) {
+      return res.status(400).json({ message: 'Duplicate seat numbers are not allowed' });
+    }
+
+    // 🔒 SECURITY: Validate showtime format (HH:MM)
+    if (!showtime || typeof showtime !== 'string' || !/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(showtime)) {
+      return res.status(400).json({ message: 'Invalid showtime format. Use HH:MM (24-hour format)' });
     }
 
     // Find or create showtimeSeats entry

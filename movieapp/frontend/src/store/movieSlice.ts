@@ -41,11 +41,7 @@ const initialState: MovieState = {
 const movieSlice = createSlice({
   name: 'movies',
   initialState,
-  reducers: {
-    clearSelectedMovie: (state) => {
-      state.selectedMovie = null;
-    },
-  },
+  reducers: {},
   extraReducers: (builder) => {
     builder
       .addCase(fetchMovies.pending, (state) => {
@@ -91,5 +87,4 @@ const movieSlice = createSlice({
   },
 });
 
-export const { clearSelectedMovie } = movieSlice.actions;
 export default movieSlice.reducer;

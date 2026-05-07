@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Movie Showcase Poster</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #f0f0f0;
+            padding: 10px;
+        }
+        
+        .poster-container {
+            width: 100%;
+            max-width: 500px;
+            aspect-ratio: 4/3;
+            background: linear-gradient(135deg, #1976d2 0%, #0d47a1 50%, #dc004e 100%);
+            border-radius: 16px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 12px 24px rgba(0, 0, 0, 0.3);
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .poster-container::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(45deg, rgba(255,255,255,0.1) 0%, transparent 50%, rgba(0,0,0,0.1) 100%);
+            pointer-events: none;
+        }
+        
+        .poster-content {
+            position: relative;
+            z-index: 2;
+            text-align: center;
+            color: white;
+            padding: 40px;
+        }
+        
+        .poster-emoji {
+            font-size: 140px;
+            line-height: 1;
+            margin-bottom: 30px;
+            filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.3));
+            animation: pulse 2s ease-in-out infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% {
+                transform: scale(1);
+            }
+            50% {
+                transform: scale(1.05);
+            }
+        }
+        
+        .poster-title {
+            font-size: 36px;
+            font-weight: bold;
+            letter-spacing: 3px;
+            text-shadow: 2px 2px 8px rgba(0, 0, 0, 0.4);
+            margin-bottom: 15px;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        .poster-subtitle {
+            font-size: 18px;
+            font-weight: 300;
+            letter-spacing: 1px;
+            text-shadow: 1px 1px 4px rgba(0, 0, 0, 0.4);
+            opacity: 0.95;
+        }
+        
+        .film-strip {
+            position: absolute;
+            width: 30px;
+            height: 100%;
+            background: repeating-linear-gradient(
+                90deg,
+                #222 0px,
+                #222 5px,
+                #111 5px,
+                #111 10px
+            );
+            left: 0;
+            opacity: 0.3;
+        }
+        
+        .film-strip-right {
+            right: 0;
+            left: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="poster-container">
+        <div class="film-strip"></div>
+        <div class="film-strip film-strip-right"></div>
+        <div class="poster-content">
+            <div class="poster-emoji">🎬</div>
+            <div class="poster-title">MOVIE SHOWCASE</div>
+            <div class="poster-subtitle">Premium Cinema Experience</div>
+        </div>
+    </div>
+</body>
+</html>

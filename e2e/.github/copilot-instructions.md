@@ -7,7 +7,7 @@ Summary:
 Key files and patterns:
 - `playwright.config.ts`: Playwright configuration. Note `baseURL` is commented out; tests use absolute URLs. `trace: 'on-first-retry'` is enabled.
 - `package.json`: Contains `scripts` → `test` uses `playwright test`.
-- `tests/*.spec.ts`: Playwright test files; rely on Material-UI CSS selectors (e.g., `.MuiBox-root .MuiPaper-root`) and text selectors (`text=ShowGlow`).
+- `tests/*.spec.ts`: Playwright test files; rely on Material-UI CSS selectors (e.g., `.MuiBox-root .MuiPaper-root`) and text selectors (`text=TicketsVenue`).
 - `playwright-report/`: CI and local test reports are written here.
 - `.github/workflows/playwright.yml`: CI workflow that installs dependencies and runs `npx playwright test`.
 
@@ -29,7 +29,7 @@ Developer workflows (how to run & debug):
 Patterns & Conventions to follow in tests:
 - Tests are TypeScript-based; keep type-safety but avoid complex type-only code.
 - Use Playwright's `test` and `expect` fixtures; tests must not use `test.only` (CI prevents `test.only`).
-- Prefer textual selectors where available: `page.locator('text=ShowGlow')` is resilient.
+- Prefer textual selectors where available: `page.locator('text=TicketsVenue')` is resilient.
 - Current tests use Material UI classes for DOM selection; if you add tests, prefer stable `data-testid` attributes when possible to avoid fragility.
 - Tests assume a deterministic dataset. If adding tests that depend on seeded data, add a dedicated `seed.spec.ts` or augment CI to run a seeding step.
 

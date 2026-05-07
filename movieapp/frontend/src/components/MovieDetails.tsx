@@ -3,6 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import { fetchMovieById } from '../store/movieSlice';
 import { RootState, AppDispatch } from '../store/store';
+import SeatGridWrapper from './SeatGridWrapper';
+import YouTubeTrailer from './YouTubeTrailer';
 import {
   Container,
   Paper,
@@ -58,12 +60,27 @@ const MovieDetails: React.FC = () => {
   const { selectedMovie, loading, error } = useSelector((state: RootState) => state.movies);
   const [selectedTime, setSelectedTime] = useState<string>('');
   const [selectedSeats, setSelectedSeats] = useState<number[]>([]);
+  // Trailer Dialog
+  const [trailerDialogOpen, setTrailerDialogOpen] = useState(false);
 
   useEffect(() => {
     if (id) {
       dispatch(fetchMovieById(parseInt(id)));
     }
   }, [dispatch, id]);
+
+  // Feature 2.2: Warn before leaving with unsaved seats
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (selectedSeats.length > 0) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [selectedSeats]);
 
   if (loading) {
     return (
@@ -161,24 +178,35 @@ const MovieDetails: React.FC = () => {
   };
 
   const handleBooking = async () => {
-    if (!selectedMovie || !selectedTime) return;
+    if (!selectedMovie) return;
 
-    // Check if selected seats are still available (prevent double-booking)
+    // Feature 1.2: Validate showtime selection
+    if (!selectedTime) {
+      window.alert('Please select a showtime');
+      return;
+    }
+
+    // Feature 1.2: Validate seat selection
+    if (selectedSeats.length === 0) {
+      window.alert('Please select at least one seat');
+      return;
+    }
+
+    // Feature 1.1: Check if selected seats are still available (prevent double-booking)
     const freshMovie = await dispatch(fetchMovieById(selectedMovie.id)).unwrap();
     const showtimeSeat = freshMovie.showtimeSeats?.find(s => s.showtime === selectedTime);
     
-    const unavailableSeats = selectedSeats.filter(
+    const conflictingSeats = selectedSeats.filter(
       seat => !showtimeSeat?.availableSeats.includes(seat)
     );
 
-    if (unavailableSeats.length > 0) {
-      // Show error if seats are no longer available
-      alert(
-        `Sorry! Seats ${unavailableSeats.join(', ')} are no longer available. ` +
-        `Please select different seats.`
-      );
-      // Refresh available seats
-      setSelectedSeats(prev => prev.filter(seat => !unavailableSeats.includes(seat)));
+    if (conflictingSeats.length > 0) {
+      // Feature 1.1: Show browser alert for double-booking conflict
+      const conflictMessage = `Seats ${conflictingSeats.join(', ')} were just booked by another user. Please select different seats.`;
+      window.alert(conflictMessage);
+      
+      // Remove unavailable seats from selection
+      setSelectedSeats(prev => prev.filter(seat => !conflictingSeats.includes(seat)));
       return;
     }
 
@@ -265,7 +293,7 @@ const MovieDetails: React.FC = () => {
                     sx={{ color: 'white', borderColor: 'white' }}
                   />
                   <Chip 
-                    label={`$${selectedMovie.price}`}
+                    label={`₹${selectedMovie.price}`}
                     variant="outlined"
                     sx={{ color: 'white', borderColor: 'white' }}
                   />
@@ -374,7 +402,7 @@ const MovieDetails: React.FC = () => {
                     Ticket Price
                   </Typography>
                   <Typography variant="h6" color="primary.main">
-                    ${selectedMovie.price}
+                    ₹{selectedMovie.price}
                   </Typography>
                 </Paper>
               </Stack>
@@ -457,142 +485,130 @@ const MovieDetails: React.FC = () => {
                 </Box>
               </Box>
 
+              {/* Seat Grid Web Component - Shadow DOM Encapsulation */}
               <Paper 
                 elevation={3}
                 sx={{ 
                   p: 3,
                   borderRadius: 2,
                   backgroundColor: 'background.paper',
-                  position: 'relative',
-                  overflow: 'auto',
-                  maxHeight: '500px',
-                  '&::before': {
-                    content: '"Screen →"',
-                    position: 'absolute',
-                    top: '-10px',
-                    left: '50%',
-                    transform: 'translateX(-50%)',
-                    padding: '4px 20px',
-                    backgroundColor: 'primary.main',
-                    color: 'white',
-                    borderRadius: '20px',
-                    fontSize: '0.875rem',
-                    fontWeight: 'bold',
-                    boxShadow: 2,
-                    zIndex: 1
-                  }
+                  position: 'relative'
                 }}
               >
-                <Box sx={{ 
-                  display: 'grid', 
-                  gridTemplateColumns: 'repeat(10, 1fr)',
-                  gap: 0.8,
-                  mt: 2
-                }}>
-                  {Array.from({ length: 100 }, (_, i) => i + 1).map((seatNumber: number) => {
-                    const showtimeSeat = selectedMovie.showtimeSeats?.find(s => s.showtime === selectedTime);
-                    const isBooked = showtimeSeat?.bookedSeats?.includes(seatNumber) || false;
-                    const isAvailable = showtimeSeat?.availableSeats?.includes(seatNumber) || false;
-                    const isSelected = selectedSeats.includes(seatNumber);
-
-                    return (
-                      <Button
-                        key={seatNumber}
-                        disabled={isBooked}
-                        variant={isSelected ? 'contained' : 'outlined'}
-                        onClick={() => !isBooked && handleSeatClick(seatNumber)}
-                        sx={{
-                          minWidth: '50px',
-                          minHeight: '40px',
-                          padding: '4px',
-                          borderRadius: 1,
-                          fontSize: '0.75rem',
-                          fontWeight: 'bold',
-                          transition: 'all 0.2s ease-in-out',
-                          animation: isSelected ? 'pulse 0.5s' : 'none',
-                          backgroundColor: isBooked ? '#d32f2f' : isSelected ? '#1976d2' : isAvailable ? '#66bb6a' : '#ccc',
-                          borderColor: isBooked ? '#d32f2f' : isSelected ? '#1976d2' : '#66bb6a',
-                          color: 'white',
-                          '&:hover': isBooked ? { cursor: 'not-allowed' } : {
-                            backgroundColor: isSelected ? '#1565c0' : '#4caf50',
-                            transform: 'scale(1.05)'
-                          },
-                          '&.Mui-disabled': {
-                            opacity: 1,
-                            cursor: 'not-allowed',
-                            backgroundColor: '#d32f2f',
-                            color: 'white'
-                          }
-                        }}
-                      >
-                        {seatNumber}
-                      </Button>
-                    );
-                  })}
-                </Box>
+                <SeatGridWrapper
+                  totalSeats={100}
+                  seatsPerRow={10}
+                  availableSeats={selectedMovie.showtimeSeats?.find(s => s.showtime === selectedTime)?.availableSeats || []}
+                  bookedSeats={selectedMovie.showtimeSeats?.find(s => s.showtime === selectedTime)?.bookedSeats || []}
+                  selectedSeats={selectedSeats}
+                  showtime={selectedTime}
+                  moviePrice={selectedMovie.price}
+                  onSeatSelect={handleSeatClick}
+                />
                 <Box sx={{ mt: 2, textAlign: 'center', fontSize: '0.85rem', color: 'text.secondary' }}>
                   Available: {selectedMovie.showtimeSeats?.find(s => s.showtime === selectedTime)?.availableSeats.length || 0} | Booked: {selectedMovie.showtimeSeats?.find(s => s.showtime === selectedTime)?.bookedSeats.length || 0} | Total: 100
                 </Box>
               </Paper>
+
+              {selectedSeats.length > 0 && (
+                <Paper
+                  elevation={3}
+                  sx={{
+                    mt: 4,
+                    p: 3,
+                    borderRadius: 2,
+                    backgroundColor: 'success.light'
+                  }}
+                >
+                  <Stack spacing={2}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Typography variant="subtitle1">Selected Seats:</Typography>
+                      <Typography variant="subtitle1" fontWeight="bold">
+                        {selectedSeats.join(', ')}
+                      </Typography>
+                    </Box>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Typography variant="subtitle1">Price per Ticket:</Typography>
+                      <Typography variant="subtitle1" fontWeight="bold">
+                        ₹{selectedMovie.price}
+                      </Typography>
+                    </Box>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Typography variant="h6">Total Amount:</Typography>
+                      <Typography variant="h6" fontWeight="bold" color="primary.main">
+                        ₹{(selectedMovie.price * selectedSeats.length)}
+                      </Typography>
+                    </Box>
+                  </Stack>
+                </Paper>
+              )}
             </Box>
           )}
 
-          {selectedTime && selectedSeats.length > 0 && (
-            <Paper
-              elevation={3}
-              sx={{
-                mt: 4,
-                p: 3,
-                borderRadius: 2,
-                backgroundColor: 'success.light'
-              }}
-            >
-              <Stack spacing={2}>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Typography variant="subtitle1">Selected Seats:</Typography>
-                  <Typography variant="subtitle1" fontWeight="bold">
-                    {selectedSeats.join(', ')}
-                  </Typography>
-                </Box>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Typography variant="subtitle1">Price per Ticket:</Typography>
-                  <Typography variant="subtitle1" fontWeight="bold">
-                    ${selectedMovie.price.toFixed(2)}
-                  </Typography>
-                </Box>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Typography variant="h6">Total Amount:</Typography>
-                  <Typography variant="h6" fontWeight="bold" color="primary.main">
-                    ${(selectedMovie.price * selectedSeats.length).toFixed(2)}
-                  </Typography>
-                </Box>
-                <Button
-                  variant="contained"
-                  color="primary"
-                  fullWidth
-                  sx={{ 
-                    mt: 2,
-                    py: 2,
-                    borderRadius: 2,
-                    fontSize: '1.2rem',
-                    fontWeight: 'bold',
-                    backgroundColor: 'success.main',
-                    transition: 'all 0.3s ease',
-                    '&:hover': {
-                      transform: 'translateY(-2px)',
-                      boxShadow: 4,
-                      backgroundColor: 'success.dark'
-                    }
-                  }}
-                  onClick={handleBooking}
-                >
-                  Confirm Booking
-                </Button>
-              </Stack>
-            </Paper>
-          )}
+          <Paper
+            elevation={3}
+            sx={{
+              mt: selectedTime ? 4 : 3,
+              p: 3,
+              borderRadius: 2,
+              backgroundColor: 'background.paper'
+            }}
+          >
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+              <Button
+                variant="outlined"
+                color="primary"
+                fullWidth
+                sx={{ 
+                  py: 2,
+                  borderRadius: 2,
+                  fontSize: '1rem',
+                  fontWeight: 'bold',
+                  transition: 'all 0.3s ease',
+                  '&:hover': {
+                    transform: 'translateY(-2px)',
+                    boxShadow: 2
+                  }
+                }}
+                onClick={() => setTrailerDialogOpen(true)}
+              >
+                🎬 Watch Trailer
+              </Button>
+              <Button
+                variant="contained"
+                color="primary"
+                fullWidth
+                sx={{ 
+                  py: 2,
+                  borderRadius: 2,
+                  fontSize: '1.2rem',
+                  fontWeight: 'bold',
+                  backgroundColor: 'success.main',
+                  transition: 'all 0.3s ease',
+                  '&:hover': {
+                    transform: 'translateY(-2px)',
+                    boxShadow: 4,
+                    backgroundColor: 'success.dark'
+                  }
+                }}
+                onClick={handleBooking}
+              >
+                Confirm Booking
+              </Button>
+            </Stack>
+          </Paper>
         </Box>
       </Stack>
+
+      {/* YouTube Trailer Dialog */}
+      <YouTubeTrailer
+        open={trailerDialogOpen}
+        trailerUrl={selectedMovie?.trailerUrl || ''}
+        movieTitle={selectedMovie?.title || ''}
+        onClose={() => setTrailerDialogOpen(false)}
+      />
+
+
     </Container>
   );
 };
