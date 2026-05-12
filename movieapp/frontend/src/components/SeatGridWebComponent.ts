@@ -241,7 +241,7 @@ class SeatGridElement extends HTMLElement {
       else if (isSelected) seatClass = 'selected';
       else if (isAvailable) seatClass = 'available';
 
-      const clickable = isAvailable || isSelected ? 'clickable' : '';
+      const clickable = isAvailable || isSelected ? 'visible' : '';
 
       html += `
         <div 
@@ -260,7 +260,7 @@ class SeatGridElement extends HTMLElement {
 
   // Attach event listeners
   private attachEventListeners() {
-    const seats = this.shadow.querySelectorAll('.seat.clickable');
+    const seats = this.shadow.querySelectorAll('.seat.visible');
     seats.forEach(seat => {
       seat.addEventListener('click', (e) => this.handleSeatClick(e));
       seat.addEventListener('keypress', (e) => {
