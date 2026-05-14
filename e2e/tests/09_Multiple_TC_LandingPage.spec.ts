@@ -27,8 +27,12 @@ test('Verify application display and navigate to movie details for The Avengers'
 test('navigate to movie details for ID 3', async ({ page }) => {
   await expect(page).toHaveTitle(/React|Movie|TicketsVenue|Movie Booking/i);
 
-  const movie3Link = page.locator('.MuiCard-root:has(h2:has-text("The Avengers")) button');
-  //const movie3Link = page.locator('.MuiPaper-root.MuiCard-root').filter({ has: page.locator('h2', { hasText: 'The Avengers' })}).filter({ has: page.locator('button')})
+  // older version css selector
+  //const movie3Link = page.locator('.MuiCard-root:has(h2:has-text("The Avengers")) button');
+  /* const movie3Link = page.locator('.MuiPaper-root.MuiCard-root')
+  .filter({ has: page.locator('h2', { hasText: 'The Avengers' })})
+  .filter({ has: page.locator('button')}) */
+  const movie3Link = page.locator('.MuiPaper-root.MuiCard-root').filter({ has: page.locator('h2', { hasText: 'The Avengers' })}).locator('button');
   await expect(movie3Link).toBeVisible(); 
   await movie3Link.click();
 
