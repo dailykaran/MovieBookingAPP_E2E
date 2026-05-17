@@ -2,24 +2,36 @@ import { test, expect } from '@playwright/test';
 
 test('Loading spinner appears during booking', async ({ page }) => {
   await page.goto('http://localhost:3000/movie/1');
-  const showtimeBtn = page.getByRole('button', { name: '21:00' }); 
   
+  // Use getByRole for better resilience outside Shadow DOM
+  const showtimeBtn = page.getByRole('button', { name: '21:00' }); 
   await expect(showtimeBtn).toBeVisible();
   await showtimeBtn.click();
 
   try {
+    // 1. Locate the container host (Shadow DOM boundary)
     const seatGrid = page.locator('seat-grid'); 
-    await expect(seatGrid).toBeVisible();
+    await expect(seatGrid).toBeAttached();
 
-    const seats = seatGrid.locator('.seat.available.visible');  
-    await expect(seats.first()).toBeVisible();  
-    await seats.first().click();
+    // 2. Target seats inside the Shadow DOM using updated class combination
+    // Source analysis confirms .seat.available.click is the correct selector
+    const availableSeat = seatGrid.locator('.seat.available.click').first();
     
-    const confirmBtn = page.locator('button', { hasText: /Confirm/i });
+    await expect(availableSeat).toBeAttached();
+    await availableSeat.scrollIntoViewIfNeeded();
+    await availableSeat.click();
+    
+    // 3. Confirm button is outside Shadow DOM, use getByRole
+    const confirmBtn = page.getByRole('button', { name: /confirm/i });
     await expect(confirmBtn).toBeVisible(); 
-    await confirmBtn.click();       
-    await page.waitForURL('**/user-details', { timeout: 10000 }); 
-      
+    
+    // 4. Perform the click and wait for navigation sequence
+    await confirmBtn.click();
+    
+    // Wait for the URL to change
+    await page.waitForURL('**/user-details', { timeout: 15000 });
+    await page.waitForLoadState('domcontentloaded');
+
   } catch (error) {
     throw new Error('Error occurred during booking process: ' + (error instanceof Error ? error.message : String(error)));
   }

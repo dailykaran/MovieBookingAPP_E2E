@@ -1,0 +1,34 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^node -e \"import\\('@google/genai'\\)\\.then\\(m => \\{ const genAI = new m\\.GoogleGenAI\\(\\{apiKey: 'test'\\}\\); console\\.log\\(typeof genAI\\.models\\.generateContent\\); \\}\\)\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^cd d:\\\\AI_explore\\\\APP_E2E_JSMovieBooking\\\\AI_Powered_MovieBookingAPP_E2E\\\\e2e ; node -e \"\nimport\\('@google/genai'\\)\\.then\\(m => \\{\n  const genAI = new m\\.GoogleGenAI\\(\\{apiKey: 'test'\\}\\);\n  // Check the generateContent method signature\n  const sig = genAI\\.models\\.generateContent\\.toString\\(\\)\\.substring\\(0, 200\\);\n  console\\.log\\('generateContent signature:'\\);\n  console\\.log\\(sig\\);\n\\}\\)\n\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^cd d:\\\\AI_explore\\\\APP_E2E_JSMovieBooking\\\\AI_Powered_MovieBookingAPP_E2E\\\\e2e ; node -e \"\nimport dotenv from 'dotenv'; \nimport path from 'path';\nimport \\{ fileURLToPath \\} from 'url';\n\nconst __filename = fileURLToPath\\(import\\.meta\\.url\\);\nconst __dirname = path\\.dirname\\(__filename\\);\nconst envPath = path\\.join\\(__dirname, '\\.env'\\);\ndotenv\\.config\\(\\{ path: envPath \\}\\);\n\nconsole\\.log\\('API Key loaded:', process\\.env\\.GEMINI_API_KEY_TEST \\? 'Yes \\(' \\+ process\\.env\\.GEMINI_API_KEY_TEST\\.substring\\(0, 15\\) \\+ '\\.\\.\\.\\)' : 'No'\\);\n\" 2>&1$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^node test-generator\\.js$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^cd d:\\\\AI_explore\\\\APP_E2E_JSMovieBooking\\\\AI_Powered_MovieBookingAPP_E2E\\\\e2e ; node -e \"\nimport\\('\\./healer-report-generator\\.js'\\)\\.then\\(\\(\\{ generateHtmlReport \\}\\) => \\{\n  const mockResults = \\{\n    duration: '12s',\n    totalTests: 1,\n    fixedCount: 1,\n    verifiedCount: 1,\n    successRate: 100,\n    tests: \\[\\{\n      title: 'Verify label names on user details page',\n      errorType: 'timeout',\n      error: 'Test timeout of 30000ms exceeded\\.',\n      file: '03_LableName\\.spec\\.ts'\n    \\}\\]\n  \\};\n  generateHtmlReport\\(mockResults\\);\n  console\\.log\\('✅ Report generated successfully!'\\);\n\\}\\)\\.catch\\(e => console\\.error\\('Error:', e\\)\\);\n\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "ConvertFrom-Json": true,
+        "/^node test-source-extraction\\.js$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "npm run heal:gemini:verbose": true,
+        "/^cd \"d:\\\\AI_explore\\\\APP_E2E_JSMovieBooking\\\\AI_Powered_MovieBookingAPP_E2E\\\\e2e\" ; node -c gemini-healer\\.js ; echo \"✅ Syntax check passed\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}

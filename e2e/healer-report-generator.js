@@ -91,7 +91,8 @@ function loadHealingLogs() {
 }
 
 /**
- * Extract locator changes from healing logs
+ * Extract changes from healing logs - handles all types of changes
+ * (selectors, text, URLs, architectural fixes, etc.)
  */
 function extractLocatorChanges(healingLogs) {
   if (!healingLogs || !healingLogs.events) return [];
@@ -100,19 +101,49 @@ function extractLocatorChanges(healingLogs) {
   const processedElements = new Set();
   
   healingLogs.events.forEach(event => {
-    if ((event.eventType === 'element_healed' || event.eventType === 'locator_failure' || event.eventType === 'locator_found') && 
-        event.elementName && event.workingLocator && event.failedLocator) {
-      const key = `${event.elementName}|${event.failedLocator}`;
-      if (!processedElements.has(key)) {
-        processedElements.add(key);
-        changes.push({
-          elementName: event.elementName,
-          failedLocator: event.failedLocator,
-          workingLocator: event.workingLocator,
-          timestamp: event.timestamp,
-          duration: event.duration
-        });
-      }
+    // Look for events that indicate actual changes were applied
+    const isHealed = event.eventType === 'element_healed' || 
+                     event.eventType === 'test_fixed_with_change' ||
+                     event.eventType === 'locator_failure' || 
+                     event.eventType === 'locator_found';
+    
+    if (!isHealed || !event.elementName) return;
+    
+    // Handle different types of changes
+    const changeType = event.details?.changeType || 
+                      (event.details?.decision === 'ARCHITECTURAL_FIX' ? 'architecture' : 'selector');
+    
+    // Extract change details based on event type
+    let failedValue = event.failedLocator || event.details?.oldValue || 'N/A';
+    let workingValue = event.workingLocator || event.details?.newValue || 'N/A';
+    
+    // Skip if both are N/A or same (no actual change)
+    if ((failedValue === 'N/A' && workingValue === 'N/A') || 
+        (failedValue === workingValue && changeType === 'selector')) {
+      return;
+    }
+    
+    // Use details object as backup source for changes
+    if (failedValue === 'N/A' && event.details?.oldValue) {
+      failedValue = event.details.oldValue;
+    }
+    if (workingValue === 'N/A' && event.details?.newValue) {
+      workingValue = event.details.newValue;
+    }
+    
+    const key = `${event.elementName}|${failedValue}|${workingValue}|${changeType}`;
+    if (!processedElements.has(key)) {
+      processedElements.add(key);
+      changes.push({
+        elementName: event.elementName,
+        failedLocator: failedValue,
+        workingLocator: workingValue,
+        changeType: changeType,
+        confidence: event.details?.confidence || null,
+        decision: event.details?.decision || null,
+        timestamp: event.timestamp,
+        duration: event.duration
+      });
     }
   });
   
@@ -120,24 +151,139 @@ function extractLocatorChanges(healingLogs) {
 }
 
 /**
- * Extract error patterns from test results
+ * Extract all changes from healing logs (selectors, text, URLs, architecture, etc.)
+ * This handles all types of Playwright test failures
+ */
+function extractAllSelectors(healingLogs) {
+  if (!healingLogs || !healingLogs.events) return [];
+  
+  const selectors = [];
+  const processedElements = new Set();
+  
+  healingLogs.events.forEach(event => {
+    // Collect all healing events
+    const isRelevant = event.eventType === 'element_healed' || 
+                       event.eventType === 'test_fixed_with_change' ||
+                       event.eventType === 'dom_architecture_detected' ||
+                       event.eventType === 'healer_decision';
+    
+    if (!isRelevant || !event.elementName) return;
+    
+    // Determine change type
+    let changeType = 'unknown';
+    if (event.details?.changeType) {
+      changeType = event.details.changeType; // selector, text, url, architecture
+    } else if (event.eventType === 'dom_architecture_detected') {
+      changeType = 'architecture';
+    } else if (event.failedLocator && event.workingLocator && 
+               event.failedLocator !== event.workingLocator) {
+      changeType = 'selector';
+    }
+    
+    // Extract failed and working values with fallbacks
+    const failedValue = event.failedLocator || 
+                       event.details?.oldValue || 
+                       (event.eventType === 'dom_architecture_detected' ? 'Shadow DOM / Web Components' : 'Unknown');
+    
+    const workingValue = event.workingLocator || 
+                        event.details?.newValue || 
+                        (event.eventType === 'dom_architecture_detected' ? 'Architectural fixes applied' : 'Fixed');
+    
+    const key = `${event.elementName}|${failedValue}|${changeType}`;
+    if (!processedElements.has(key)) {
+      processedElements.add(key);
+      
+      const hasChanged = failedValue !== workingValue || changeType !== 'selector';
+      
+      const selectorObj = {
+        elementName: event.elementName,
+        failedLocator: failedValue,
+        workingLocator: workingValue,
+        changeType: changeType,
+        eventType: event.eventType,
+        hasChanged: hasChanged,
+        confidence: event.details?.confidence || null,
+        decision: event.details?.decision || null,
+        timestamp: event.timestamp
+      };
+      
+      selectors.push(selectorObj);
+    }
+  });
+  
+  return selectors;
+}
+
+/**
+ * Categorize error type from error message - handles all Playwright failure types
+ */
+function categorizeErrorType(errorMessage) {
+  if (!errorMessage) return 'Unknown Error';
+  
+  const msg = errorMessage.toLowerCase();
+  
+  // Locator/Selector errors
+  if (msg.includes('locator') && msg.includes('timeout')) return 'Locator Timeout';
+  if (msg.includes('getbyrole') || msg.includes('locator') || msg.includes('selector')) return 'Selector Error';
+  if (msg.includes('element not found') || msg.includes('no element matches')) return 'Element Not Found';
+  
+  // Navigation errors
+  if (msg.includes('navigation') || msg.includes('page.goto')) return 'Navigation Error';
+  if (msg.includes('404') || msg.includes('not found')) return 'Page Not Found (404)';
+  if (msg.includes('net::')) return 'Network Error';
+  
+  // Assertion errors
+  if (msg.includes('assertion') || msg.includes('expect')) return 'Assertion Failed';
+  if (msg.includes('timeout')) return 'Timeout Error';
+  
+  // Visibility/Interaction errors
+  if (msg.includes('visible') || msg.includes('visibility')) return 'Visibility Error';
+  if (msg.includes('click') && msg.includes('not visible')) return 'Element Not Visible';
+  if (msg.includes('fill') || msg.includes('type')) return 'Input/Fill Error';
+  
+  // DOM/Architecture errors
+  if (msg.includes('shadow') || msg.includes('shadow dom')) return 'Shadow DOM Error';
+  if (msg.includes('iframe') || msg.includes('frame')) return 'iFrame Error';
+  if (msg.includes('web component')) return 'Web Component Error';
+  
+  // Text content errors
+  if (msg.includes('text') || msg.includes('content')) return 'Text Content Error';
+  
+  // Generic categorization
+  if (msg.includes('error')) return 'General Error';
+  if (msg.includes('fail')) return 'Test Failed';
+  
+  return 'Unknown Error';
+}
+
+/**
+ * Extract and categorize error patterns from test results
+ * Handles all types of Playwright test failures
  */
 function extractErrorPatterns(tests) {
   const patterns = {};
   
   tests.forEach(test => {
-    const errorType = test.errorType || 'Unknown Error';
+    // Use smart categorization instead of just errorType field
+    const errorType = categorizeErrorType(test.error || test.errorType || '');
+    
     if (!patterns[errorType]) {
       patterns[errorType] = {
         count: 0,
         tests: [],
-        examples: []
+        examples: [],
+        errorMessages: []
       };
     }
     patterns[errorType].count++;
     patterns[errorType].tests.push(test.title);
-    if (patterns[errorType].examples.length < 2) {
-      patterns[errorType].examples.push(test.error?.substring(0, 200) || '');
+    
+    // Collect unique error messages (up to 3 examples)
+    if (patterns[errorType].examples.length < 3) {
+      const errorMsg = test.error?.substring(0, 300) || test.errorType || 'Unknown error';
+      if (!patterns[errorType].examples.includes(errorMsg)) {
+        patterns[errorType].examples.push(errorMsg);
+      }
     }
   });
   
@@ -158,6 +304,7 @@ function generateHtmlReport(healingResults) {
   // Load healing logs if available
   const healingLogs = loadHealingLogs();
   const locatorChanges = extractLocatorChanges(healingLogs);
+  const allSelectors = extractAllSelectors(healingLogs);
   const errorPatterns = extractErrorPatterns(healingResults.tests);
 
   const htmlContent = `<!DOCTYPE html>
@@ -1031,38 +1178,71 @@ function generateHtmlReport(healingResults) {
             <!-- TAB 2: LOCATOR CHANGES -->
             <div id="locators" class="tab-content">
                 <div class="results">
-                    <h2>🔧 Locator Changes Applied</h2>
+                    <h2>🔧 All Changes Applied</h2>
                     ${locatorChanges.length > 0 ? `
                         <div class="locator-fix-grid">
-                            ${locatorChanges.map((change, idx) => `
-                                <div class="locator-fix-card">
-                                    <div class="locator-fix-header">
-                                        <div>Element ${idx + 1}: <strong>${escapeHtmlNode(change.elementName)}</strong></div>
-                                        <div style="font-size: 0.85em; margin-top: 5px; opacity: 0.9;">Fixed at ${new Date(change.timestamp).toLocaleTimeString()}</div>
-                                    </div>
-                                    <div class="locator-fix-body">
-                                        <div class="locator-comparison">
-                                            <div>
-                                                <span class="comparison-label">❌ Failed Locator</span>
-                                                <div class="comparison-column failed">${escapeHtmlNode(change.failedLocator)}</div>
-                                            </div>
-                                            <div>
-                                                <span class="comparison-label">✅ Working Locator</span>
-                                                <div class="comparison-column working">${escapeHtmlNode(change.workingLocator)}</div>
-                                            </div>
-                                        </div>
-                                        ${change.duration ? `
-                                            <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--grey-border); font-size: 0.9em; color: var(--text-secondary);">
-                                                ⏱️ Resolution time: <strong>${change.duration}ms</strong>
-                                            </div>
-                                        ` : ''}
-                                    </div>
-                                </div>
-                            `).join('')}
+                            ${locatorChanges.map((change, idx) => {
+                                // Determine change type icon
+                                let icon = '⚙️';
+                                let changeTypeLabel = 'CHANGE';
+                                let changeTypeColor = '#6b7280';
+                                
+                                if (change.changeType === 'selector') {
+                                  icon = '🎯';
+                                  changeTypeLabel = 'SELECTOR';
+                                  changeTypeColor = '#1e3a8a';
+                                } else if (change.changeType === 'text') {
+                                  icon = '📝';
+                                  changeTypeLabel = 'TEXT';
+                                  changeTypeColor = '#2563eb';
+                                } else if (change.changeType === 'url') {
+                                  icon = '🔗';
+                                  changeTypeLabel = 'URL';
+                                  changeTypeColor = '#7c3aed';
+                                } else if (change.changeType === 'architecture') {
+                                  icon = '🏗️';
+                                  changeTypeLabel = 'ARCHITECTURE';
+                                  changeTypeColor = '#ec4899';
+                                }
+                                
+                                const confidenceSpan = change.confidence ? '<span>📊 ' + change.confidence + '% confidence</span>' : '';
+                                const decisionInfo = change.decision ? '<strong>Decision:</strong> ' + change.decision + '<br>' : '';
+                                const durationInfo = change.duration ? '<br><strong>Resolution:</strong> ' + change.duration + 'ms' : '';
+                                
+                                return '<div class="locator-fix-card">' +
+                                  '<div class="locator-fix-header">' +
+                                    '<div style="display: flex; gap: 10px; align-items: center;">' +
+                                      '<span style="background: ' + changeTypeColor + '; color: white; padding: 4px 8px; border-radius: 3px; font-size: 0.75em; font-weight: 600;">' + icon + ' ' + changeTypeLabel + '</span>' +
+                                      '<strong>' + escapeHtmlNode(change.elementName) + '</strong>' +
+                                    '</div>' +
+                                    '<div style="font-size: 0.85em; margin-top: 8px; opacity: 0.9; display: flex; gap: 15px; flex-wrap: wrap;">' +
+                                      '<span>Fixed at ' + new Date(change.timestamp).toLocaleTimeString() + '</span>' +
+                                      confidenceSpan +
+                                    '</div>' +
+                                  '</div>' +
+                                  '<div class="locator-fix-body">' +
+                                    '<div class="locator-comparison">' +
+                                      '<div>' +
+                                        '<span class="comparison-label">❌ Before (Failed)</span>' +
+                                        '<div class="comparison-column failed">' + escapeHtmlNode(change.failedLocator) + '</div>' +
+                                      '</div>' +
+                                      '<div>' +
+                                        '<span class="comparison-label">✅ After (Fixed)</span>' +
+                                        '<div class="comparison-column working">' + escapeHtmlNode(change.workingLocator) + '</div>' +
+                                      '</div>' +
+                                    '</div>' +
+                                    '<div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--grey-border); font-size: 0.9em; color: var(--text-secondary);">' +
+                                      '<strong>Change Type:</strong> ' + changeTypeLabel + '<br>' +
+                                      decisionInfo +
+                                      durationInfo +
+                                    '</div>' +
+                                  '</div>' +
+                                '</div>';
+                            }).join('')}
                         </div>
                     ` : `
                         <div class="verification-box success" style="text-align: center; padding: 30px;">
-                            ✅ No locator changes needed - All selectors working correctly!
+                            ✅ No changes applied - All tests passed on first run!
                         </div>
                     `}
                 </div>
@@ -1110,28 +1290,72 @@ function generateHtmlReport(healingResults) {
             <!-- TAB 4: SELECTORS -->
             <div id="selectors" class="tab-content">
                 <div class="results">
-                    <h2>🎯 All Selectors & Locators Used</h2>
-                    ${locatorChanges.length > 0 ? `
+                    <h2>🎯 All Changes & Selectors Analyzed</h2>
+                    ${allSelectors.length > 0 ? `
                         <div class="selector-showcase">
-                            ${locatorChanges.map((change, idx) => `
-                                <div class="selector-card">
-                                    <div class="selector-card-header">
-                                        ${change.elementName}
-                                    </div>
-                                    <div class="selector-card-body">
-                                        <span class="selector-type">Working</span>
-                                        <div class="selector-code">${escapeHtmlNode(change.workingLocator)}</div>
-                                        <div class="selector-usage">
-                                            <strong>Element:</strong> ${escapeHtmlNode(change.elementName)}<br>
-                                            <strong>Status:</strong> ✅ Active
-                                        </div>
-                                    </div>
-                                </div>
-                            `).join('')}
+                            ${allSelectors.map((selector, idx) => {
+                                // Determine change type icon and label
+                                let icon = '⚙️';
+                                let typeLabel = selector.changeType.toUpperCase();
+                                let typeColor = '#6b7280';
+                                
+                                if (selector.changeType === 'selector') {
+                                  icon = '🎯';
+                                  typeLabel = 'SELECTOR';
+                                  typeColor = '#1e3a8a';
+                                } else if (selector.changeType === 'text') {
+                                  icon = '📝';
+                                  typeLabel = 'TEXT';
+                                  typeColor = '#2563eb';
+                                } else if (selector.changeType === 'url') {
+                                  icon = '🔗';
+                                  typeLabel = 'URL';
+                                  typeColor = '#7c3aed';
+                                } else if (selector.changeType === 'architecture') {
+                                  icon = '🏗️';
+                                  typeLabel = 'ARCHITECTURE';
+                                  typeColor = '#ec4899';
+                                }
+                                
+                                const changedBadge = selector.hasChanged ? 
+                                  '<span class="selector-type" style="background: var(--green);">✅ CHANGED</span>' : 
+                                  '<span class="selector-type" style="background: #9ca3af;">⚪ NO CHANGE</span>';
+                                
+                                const confidenceBadge = selector.confidence ? 
+                                  '<span class="selector-type" style="background: #f59e0b; font-size: 0.75em;">📊 ' + selector.confidence + '% confidence</span>' : 
+                                  '';
+                                
+                                const changeContent = selector.hasChanged ?
+                                  '<div style="margin-top: 10px; font-size: 0.9em; color: var(--text-secondary);"><strong>❌ Before (Failed):</strong></div>' +
+                                  '<div class="selector-code" style="background: var(--bg-error); border-color: var(--border-error); color: #991b1b; margin-bottom: 10px;">' + escapeHtmlNode(selector.failedLocator) + '</div>' +
+                                  '<div style="font-size: 0.9em; color: var(--text-secondary);"><strong>✅ After (Fixed):</strong></div>' +
+                                  '<div class="selector-code" style="background: var(--bg-success); border-color: var(--border-success); color: #047857;">' + escapeHtmlNode(selector.workingLocator) + '</div>' :
+                                  '<div style="margin-top: 10px; font-size: 0.9em; color: var(--text-secondary);"><strong>' + typeLabel + ':</strong></div>' +
+                                  '<div class="selector-code">' + escapeHtmlNode(selector.workingLocator) + '</div>';
+                                
+                                const decisionInfo = selector.decision ? '<br><strong>Decision:</strong> ' + selector.decision : '';
+                                
+                                return '<div class="selector-card">' +
+                                  '<div class="selector-card-header">' + escapeHtmlNode(selector.elementName) + '</div>' +
+                                  '<div class="selector-card-body">' +
+                                    '<div style="display: flex; gap: 10px; margin-bottom: 12px; align-items: center; flex-wrap: wrap;">' +
+                                      '<span class="selector-type" style="background: ' + typeColor + ';">' + icon + ' ' + typeLabel + '</span>' +
+                                      changedBadge +
+                                      confidenceBadge +
+                                    '</div>' +
+                                    changeContent +
+                                    '<div class="selector-usage" style="margin-top: 12px;">' +
+                                      '<strong>Element:</strong> ' + escapeHtmlNode(selector.elementName) + '<br>' +
+                                      '<strong>Type:</strong> ' + typeLabel + '<br>' +
+                                      '<strong>Status:</strong> ' + (selector.hasChanged ? '✅ Fixed' : '✅ Working') + decisionInfo +
+                                    '</div>' +
+                                  '</div>' +
+                                '</div>';
+                            }).join('')}
                         </div>
                     ` : `
                         <div class="verification-box warning" style="text-align: center; padding: 30px;">
-                            ℹ️ No selector data available - Run the healer to collect selector information.
+                            ℹ️ No change data available - Run the healer to collect healing information.
                         </div>
                     `}
                 </div>
@@ -1381,4 +1605,4 @@ function generateReportIndex(reportDir) {
   }
 }
 
-export { generateHtmlReport, escapeHtmlNode, loadHealingLogs, extractLocatorChanges, extractErrorPatterns };
+export { generateHtmlReport, escapeHtmlNode, loadHealingLogs, extractLocatorChanges, extractAllSelectors, extractErrorPatterns, categorizeErrorType };

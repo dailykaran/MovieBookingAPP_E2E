@@ -22,7 +22,7 @@ import {
 import { styled } from '@mui/material/styles';
 
 interface UserDetails {
-  firstName: string;
+  fullName: string;
   lastName: string;
   email: string;
   phone: string;
@@ -56,7 +56,7 @@ const UserDetailsPage: React.FC = () => {
   const bookingDetails = location.state as LocationState;
 
   const [userDetails, setUserDetails] = useState<UserDetails>({
-    firstName: '',
+    fullName: '',
     lastName: '',
     email: '',
     phone: '',
@@ -64,7 +64,7 @@ const UserDetailsPage: React.FC = () => {
   });
 
   const [touched, setTouched] = useState<Record<keyof UserDetails, boolean>>({
-    firstName: false,
+    fullName: false,
     lastName: false,
     email: false,
     phone: false,
@@ -117,10 +117,10 @@ const UserDetailsPage: React.FC = () => {
     const nameRegex = /^[A-Za-z\s'-]+$/;
 
     switch (name) {
-      case 'firstName':
-        if (!value.trim()) return "First name is required";
-        if (value.trim().length < 2) return "First name must be at least 2 characters";
-        if (!nameRegex.test(value)) return "First name can only contain letters, spaces, hyphens, and apostrophes";
+      case 'fullName':
+        if (!value.trim()) return "Full name is required";
+        if (value.trim().length < 2) return "Full name must be at least 2 characters";
+        if (!nameRegex.test(value)) return "Full name can only contain letters, spaces, hyphens, and apostrophes";
         return "";
 
       case 'lastName':
@@ -176,7 +176,7 @@ const UserDetailsPage: React.FC = () => {
   const validateAndMarkTouched = () => {
     // Mark all fields as touched
     setTouched({
-      firstName: true,
+      fullName: true,
       lastName: true,
       email: true,
       phone: true,
@@ -275,14 +275,14 @@ const UserDetailsPage: React.FC = () => {
                 <Box sx={{ display: 'flex', gap: 2 }}>
                   <StyledTextField
                     label="Full Name"
-                    name="firstName"
-                    value={userDetails.firstName}
+                    name="fullName"
+                    value={userDetails.fullName}
                     onChange={handleInputChange}
                     fullWidth
                     required
-                    error={!!getFieldError('firstName')}
-                    helperText={getFieldError('firstName')}
-                    onBlur={() => handleBlur('firstName')}
+                    error={!!getFieldError('fullName')}
+                    helperText={getFieldError('fullName')}
+                    onBlur={() => handleBlur('fullName')}
                     inputProps={{
                       maxLength: 50
                     }}

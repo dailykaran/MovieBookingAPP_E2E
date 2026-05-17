@@ -19,7 +19,7 @@
 import fs from 'fs';
 import path from 'path';
 import { execFileSync, spawnSync } from 'child_process';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import { generateHtmlReport } from './healer-report-generator.js';
@@ -36,7 +36,7 @@ dotenv.config({ path: envPath });
 // Configuration constants with enhanced error handling
 const GEMINI_API_KEY_TEST = process.env.GEMINI_API_KEY_TEST;
 const HEALER_AUTO_FIX = process.env.HEALER_AUTO_FIX === 'true';
-const HEALER_VERBOSE = process.env.HEALER_VERBOSE === 'true';
+let HEALER_VERBOSE = process.env.HEALER_VERBOSE === 'true';  // Can be updated by CLI args
 const HEALER_MAX_FILE_SIZE = parseInt(process.env.HEALER_MAX_FILE_SIZE || '1048576', 10); // 1MB
 const HEALER_BACKUP_DIR = process.env.HEALER_BACKUP_DIR || path.join(process.cwd(), 'reports/audit/.healer-backups');
 const HEALER_AUDIT_LOG = process.env.HEALER_AUDIT_LOG || path.join(process.cwd(), 'reports/audit/.healer-audit.log');
@@ -59,7 +59,7 @@ const INFRASTRUCTURE_ERRORS = [
   'socket hang up', 'socket error', 'epipe', 'enotfound'
 ];
 
-const REQUIRED_PACKAGES = ['@google/generative-ai', '@playwright/test', 'dotenv'];
+const REQUIRED_PACKAGES = ['@google/genai', '@playwright/test', 'dotenv'];
 
 // ============ SOURCE CODE ANALYSIS CONFIGURATION ============
 const HEALER_SOURCE_CODE_ANALYSIS = process.env.HEALER_SOURCE_CODE_ANALYSIS === 'true';
@@ -118,6 +118,7 @@ let healingLogs = {
       UPDATE_TEST: 0,
       UPDATE_SELECTOR: 0,
       UPDATE_TEXT: 0,
+      SELECTOR_CLASS_UPDATE: 0,  // NEW: Class-only selector updates
       ARCHITECTURAL_FIX: 0,
       MANUAL_REVIEW: 0,
       UNKNOWN: 0
@@ -271,7 +272,9 @@ if (GEMINI_API_KEY_TEST.length < 30) {
 }
 
 // Initialize Gemini AI
-const genAI = new GoogleGenerativeAI(GEMINI_API_KEY_TEST);
+const genAI = new GoogleGenAI({
+  apiKey: GEMINI_API_KEY_TEST,
+});
 
 /**
  * Check if required npm packages are installed (Dependency Check)
@@ -940,7 +943,9 @@ function getFailedTests() {
   try {
     const resultsContent = fs.readFileSync(resultsPath, 'utf8');
     const results = JSON.parse(resultsContent);
-    
+    console.log(`📊 AI Log - Test results parsed length: ${results.suites.length} suites`);
+    // console.log(`📊 AI Log - Test results parsed: ${JSON.stringify(results, null, 2)}`);
+
     if (!validateTestResultsSchema(results)) {
       console.error('❌ Invalid test results schema');
       return [];
@@ -1588,7 +1593,7 @@ function findTraceFileForTest(testName) {
 }
 
 /**
- * Extract button text and element information from Playwright trace file
+ * Extract UI elements from a Playwright trace zip
  */
 function extractElementsFromTrace(tracePath) {
   try {
@@ -1598,6 +1603,8 @@ function extractElementsFromTrace(tracePath) {
         inputs: [],
         dialogs: [],
         htmlSnapshots: [],
+        cssClasses: [],
+        elementsByClass: {},
         error: 'Trace file not found'
       };
     }
@@ -1609,7 +1616,9 @@ function extractElementsFromTrace(tracePath) {
       buttons: [],
       inputs: [],
       dialogs: [],
-      htmlSnapshots: []
+      htmlSnapshots: [],
+      cssClasses: [],  // NEW: Track CSS class combinations
+      elementsByClass: {}  // NEW: Map of class → elements
     };
     
     // Look for trace.json which contains the actions and snapshots
@@ -1626,15 +1635,52 @@ function extractElementsFromTrace(tracePath) {
     if (traceData.snapshots && Array.isArray(traceData.snapshots)) {
       for (const snapshot of traceData.snapshots) {
         if (snapshot.str && snapshot.str.length > 0) {
-          // Extract button text from HTML
-          const buttonMatches = snapshot.str.matchAll(/<button[^>]*(?:data-testid="([^"]*)")?[^>]*>([^<]*)<\/button>/gi);
+          // NEW: Extract all elements with class attributes for class analysis
+          const allElementsWithClass = snapshot.str.matchAll(/<([a-z][a-z0-9-]*)[^>]*class="([^"]*)"[^>]*>/gi);
+          let cssClassCount = 0;
+          for (const match of allElementsWithClass) {
+            const tagName = match[1];
+            const classStr = match[2]?.trim();
+            if (classStr) {
+              const classes = classStr.split(/\s+/);
+              const classKey = classes.join('.');
+              if (!result.elementsByClass[classKey]) {
+                result.elementsByClass[classKey] = { count: 0, tags: new Set() };
+              }
+              result.elementsByClass[classKey].count++;
+              result.elementsByClass[classKey].tags.add(tagName);
+              
+              if (!result.cssClasses.includes(classKey)) {
+                result.cssClasses.push(classKey);
+                cssClassCount++;
+              }
+            }
+          }
+          if (HEALER_VERBOSE && cssClassCount > 0) {
+            console.log(`   📦 CSS classes extracted from snapshot: ${cssClassCount} unique combinations`);
+          }
+          
+          // Extract button text from HTML, including nested tags and aria-label fallbacks
+          const buttonMatches = snapshot.str.matchAll(/<button([^>]*)>([\s\S]*?)<\/button>/gi);
           for (const match of buttonMatches) {
-            const testId = match[1];
-            const text = match[2]?.trim();
+            const attrs = match[1];
+            const innerHtml = match[2] || '';
+            const testIdMatch = attrs.match(/data-testid="([^"]*)"/i);
+            const classMatch = attrs.match(/class="([^"]*)"/i);
+            const ariaLabelMatch = attrs.match(/aria-label="([^"]*)"/i);
+
+            const testId = testIdMatch ? testIdMatch[1] : null;
+            const buttonClass = classMatch ? classMatch[1] : null;
+            let text = innerHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+            if (!text && ariaLabelMatch) {
+              text = ariaLabelMatch[1].trim();
+            }
+
             if (text) {
               result.buttons.push({
                 text,
-                testId: testId || null,
+                testId,
+                classes: buttonClass ? buttonClass.split(/\s+/) : [],
                 html: match[0]
               });
             }
@@ -1674,7 +1720,10 @@ function extractElementsFromTrace(tracePath) {
     ).values());
     
     if (HEALER_VERBOSE) {
-      console.log(`📋 Extracted from trace: ${result.buttons.length} buttons, ${result.inputs.length} inputs, ${result.dialogs.length} dialogs`);
+      console.log(`📋 Extracted from trace: ${result.buttons.length} buttons, ${result.inputs.length} inputs, ${result.dialogs.length} dialogs, ${result.cssClasses.length} unique CSS class combinations`);
+      if (result.cssClasses.length > 0) {
+        console.log(`   🎨 CSS Classes found: ${result.cssClasses.slice(0, 5).join(', ')}${result.cssClasses.length > 5 ? '...' : ''}`);
+      }
     }
     
     return result;
@@ -1685,49 +1734,268 @@ function extractElementsFromTrace(tracePath) {
       inputs: [],
       dialogs: [],
       htmlSnapshots: [],
+      cssClasses: [],
+      elementsByClass: {},
       error: err.message
     };
   }
 }
 
 /**
- * Generate button text guidance from trace analysis
+ * Generate button text guidance for Gemini analysis
  */
 function generateButtonTextGuidance(traceElements, testCode) {
-  if (!traceElements || traceElements.buttons.length === 0) {
+  if (!traceElements || !traceElements.buttons || traceElements.buttons.length === 0) {
     return '';
   }
-  
-  const failedButtonMatches = testCode.match(/getByRole\(['"]button['"][^)]*,\s*\{\s*name:\s*\/([^\/]*)\//gi) || [];
-  
+
+  const failedButtonPatterns = [];
+  const roleRegexMatches = [...testCode.matchAll(/getByRole\(\s*['"]button['"][^)]*name\s*:\s*\/([^\/]*)\/[igm]*\s*\)/gi)];
+  roleRegexMatches.forEach(match => {
+    if (match[1]) failedButtonPatterns.push({ type: 'regex', value: match[1] });
+  });
+  const roleStringMatches = [...testCode.matchAll(/getByRole\(\s*['"]button['"][^)]*name\s*:\s*['"]([^'"]+)['"][^)]*\)/gi)];
+  roleStringMatches.forEach(match => {
+    if (match[1]) failedButtonPatterns.push({ type: 'string', value: match[1] });
+  });
+  const textRegexMatches = [...testCode.matchAll(/getByText\(\s*\/([^\/]*)\/[igm]*\s*\)/gi)];
+  textRegexMatches.forEach(match => {
+    if (match[1]) failedButtonPatterns.push({ type: 'regex', value: match[1] });
+  });
+  const textStringMatches = [...testCode.matchAll(/getByText\(\s*['"]([^'"]+)['"]\s*\)/gi)];
+  textStringMatches.forEach(match => {
+    if (match[1]) failedButtonPatterns.push({ type: 'string', value: match[1] });
+  });
+
   let guidance = '\n### 📋 BUTTON ELEMENTS DETECTED IN PAGE TRACE:\n';
   guidance += `**Available buttons from trace analysis:**\n`;
-  
+
   traceElements.buttons.forEach((btn, idx) => {
     guidance += `  ${idx + 1}. "${btn.text}"${btn.testId ? ` (testId: ${btn.testId})` : ''}\n`;
   });
-  
-  if (failedButtonMatches.length > 0) {
-    guidance += `\n**Failed selector patterns in test code:**\n`;
-    failedButtonMatches.forEach(match => {
-      const pattern = match.match(/\/([^\/]*)\//)[1];
-      const hasMatch = traceElements.buttons.some(b => 
-        new RegExp(pattern, 'i').test(b.text)
-      );
-      guidance += `  - \`/^${pattern}/i\` ${hasMatch ? '✅ MATCHES' : '❌ NO MATCH'}\n`;
+
+  if (failedButtonPatterns.length > 0) {
+    guidance += `\n**Failed button patterns found in test code:**\n`;
+    failedButtonPatterns.forEach(patternInfo => {
+      const patternText = patternInfo.value;
+      const matcher = patternInfo.type === 'regex'
+        ? new RegExp(patternText, 'i')
+        : new RegExp(`^${patternText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i');
+      const hasMatch = traceElements.buttons.some(b => matcher.test(b.text));
+      const pattern = patternInfo.type === 'regex' ? `/${patternText}/i` : `"${patternText}"`;
+
+      if (!hasMatch) {
+        guidance += `  - \`${pattern}\` ❌ **NO MATCH FOUND** - Button renamed or removed!\n`;
+        const closestButton = findClosestButtonMatch(patternText, traceElements.buttons);
+        if (closestButton) {
+          guidance += `    💡 Suggestion: Did you mean "${closestButton.text}"?\n`;
+          guidance += `    Fix: /^${closestButton.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/i\n`;
+        }
+      } else {
+        guidance += `  - \`${pattern}\` ✅ Match found\n`;
+      }
     });
   }
-  
-  guidance += `\n**Recommendation for button selectors:**
-Use these text patterns for getByRole('button', { name: /pattern/i }):
-${traceElements.buttons.map(btn => `  - /^${btn.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/i`).join('\n')}
 
-Or use data-testid if available:
-${traceElements.buttons.filter(b => b.testId).map(btn => `  - getByTestId('${btn.testId}')`).join('\n') || '  (no testIds found)'}
-`;
-  
-  console.log(`%c "AI Log - Generated Button Text Guidance:" ${guidance}`, 'color: #ff8c00da; font-weight: bold;');
+  guidance += `\n**Recommendation for button selectors:**\n`;
+  guidance += `Use these text patterns for getByRole('button', { name: /pattern/i }):\n`;
+  guidance += `${traceElements.buttons.map(btn => `  - /^${btn.text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/i`).join('\n')}\n`;
+  guidance += `\nOr use data-testid if available:\n`;
+  guidance += `${traceElements.buttons.filter(b => b.testId).map(btn => `  - getByTestId('${btn.testId}')`).join('\n') || '  (no testIds found)'}\n`;
+
+  console.log('AI Log - Generated Button Text Guidance:', guidance);
   return guidance;
+}
+
+/**
+ * Extract CSS classes from related component source code
+ * Looks for class definitions and usage patterns in the component that renders the failing selector
+ */
+function extractCSSClassesFromSourceCode(testCode, testFilePath) {
+  try {
+    if (HEALER_VERBOSE) console.log(`   🔍 extract CSS from source called, testCode length=${testCode?.length || 0}`);
+    // Extract component references from test (e.g., seat-grid, MovieCard, etc.)
+    const componentRefs = [];
+    
+    // Find custom element references (e.g., locator('seat-grid') or locator("seat-grid"))
+    // Support both escaped (\') and unescaped (') quotes
+    const customElementMatches = testCode.match(/locator\(\\?['"]([a-z-]+)\\?['"]\)/g) || [];
+    if (HEALER_VERBOSE) console.log(`   Regex found ${customElementMatches.length} potential matches: ${customElementMatches.slice(0, 3).join(', ')}`);
+    
+    customElementMatches.forEach(match => {
+      const name = match.match(/\\?['"]([a-z-]+)\\?['"]/)[1];
+      componentRefs.push(name);
+    });
+    if (HEALER_VERBOSE) console.log(`   Found: ${componentRefs.length} component(s): ${componentRefs.join(', ')}`);
+    
+    if (componentRefs.length === 0) return { cssClasses: [], sourceFile: null };
+    
+    // For each component, try to find its source file
+    const componentName = componentRefs[0];
+    const possiblePaths = [
+      path.join(process.cwd(), '../movieapp/frontend/src/components', `${componentName.charAt(0).toUpperCase() + componentName.slice(1).replace(/-([a-z])/g, (g) => g[1].toUpperCase())}WebComponent.ts`),
+      path.join(process.cwd(), '../movieapp/frontend/src/components', `${componentName}WebComponent.ts`),
+      path.join(process.cwd(), '../movieapp/frontend/src/components', `${componentName}.tsx`),
+      path.join(process.cwd(), '../movieapp/frontend/src/components', `${componentName}.ts`)
+    ];
+    
+    let sourceFile = null;
+    for (const filePath of possiblePaths) {
+      if (HEALER_VERBOSE) console.log(`   📍 Checking: ${filePath} ${fs.existsSync(filePath) ? '✅' : '❌'}`);
+      if (fs.existsSync(filePath)) {
+        sourceFile = filePath;
+        break;
+      }
+    }
+    
+    if (!sourceFile) {
+      return { cssClasses: [], sourceFile: null };
+    }
+    
+    // Read source file and extract CSS class definitions and actual combinations
+    const sourceCode = fs.readFileSync(sourceFile, 'utf-8');
+    const cssClasses = new Set();
+    const actualCombinations = new Set();
+    
+    // Match class attribute assignments like: class="seat ${status} ${clickable}"
+    const classAssignments = sourceCode.match(/class\s*=\s*[`'"](.*?)[`'"]/g) || [];
+    classAssignments.forEach(assignment => {
+      // Extract the class template string
+      const classStr = assignment.match(/[`'"](.*?)[`'"]/)[1];
+      
+      // Find standalone class names (not variables)
+      const classes = classStr.match(/\b[a-z][a-z0-9]*\b/gi) || [];
+      classes.forEach(cls => {
+        if (!/\$|{|}/.test(cls)) {  // Skip template variables
+          cssClasses.add(cls.toLowerCase());
+        }
+      });
+      
+      // Also store the template as-is to extract actual combinations
+      // E.g., "seat ${seatClass} ${click}" represents templates that could render:
+      // - seat booked
+      // - seat selected click
+      // - seat available click
+      if (classStr.includes('${')) {
+        actualCombinations.add(classStr);
+      }
+    });
+    
+    // Also look for const definitions like: const click = isAvailable ? 'click' : '';
+    const constAssignments = sourceCode.match(/const\s+\w+\s*=\s*[^;]*['"]([a-z]+)['"]/g) || [];
+    constAssignments.forEach(assignment => {
+      const className = assignment.match(/['"]([a-z]+)['"]/)[1];
+      cssClasses.add(className);
+    });
+    
+    // Extract actual class combinations from conditional logic
+    // Look for patterns like: if (isBooked) seatClass = 'booked'; else if (isSelected) seatClass = 'selected';
+    const seatClassLogic = sourceCode.match(/if\s*\([^)]*\)\s*seatClass\s*=\s*['"]([a-z]+)['"]/g) || [];
+    const statusClasses = [];
+    seatClassLogic.forEach(line => {
+      const match = line.match(/['"]([a-z]+)['"]/);
+      if (match) statusClasses.push(match[1]);
+    });
+    
+    // Generate actual combinations based on the conditional logic found
+    const combinedClasses = [];
+    const classArray = Array.from(cssClasses);
+    const baseClass = 'seat'; // Most component tests start with the base element selector
+    
+    if (statusClasses.length > 0) {
+      // Generate combinations with each status class
+      statusClasses.forEach(status => {
+        combinedClasses.push(`${baseClass}.${status}`);
+        // Add click variants (some states are clickable)
+        if (status !== 'booked') {  // booked seats are typically not clickable
+          combinedClasses.push(`${baseClass}.${status}.click`);
+        }
+      });
+    } else if (classArray.length > 0) {
+      // Fallback: Generate realistic combinations (not all 2^n combinations)
+      // Focus on the most likely patterns: base + one modifier, base + two modifiers
+      combinedClasses.push(baseClass);
+      classArray.forEach(cls => {
+        if (cls !== baseClass) {
+          combinedClasses.push(`${baseClass}.${cls}`);
+        }
+      });
+      
+      // Add some two-class combinations (base + state + interactive)
+      const interactiveClasses = classArray.filter(c => ['click', 'hover', 'active'].includes(c));
+      const stateClasses = classArray.filter(c => ['available', 'selected', 'booked'].includes(c));
+      
+      stateClasses.forEach(state => {
+        interactiveClasses.forEach(interactive => {
+          combinedClasses.push(`${baseClass}.${state}.${interactive}`);
+        });
+      });
+    }
+    
+    if (HEALER_VERBOSE) {
+      console.log(`📝 Extracted ${cssClasses.size} CSS classes from source: ${Array.from(cssClasses).join(', ')}`);
+      console.log(`   Status classes found: ${statusClasses.join(', ') || 'none'}`);
+      console.log(`   📦 Generated ${combinedClasses.length} realistic class combinations`);
+    }
+    
+    return { cssClasses: combinedClasses, sourceFile, baseClasses: Array.from(cssClasses) };
+  } catch (err) {
+    if (HEALER_VERBOSE) console.log(`⚠️  Error extracting CSS classes from source: ${err.message}`);
+    return { cssClasses: [], sourceFile: null };
+  }
+}
+
+/**
+ * Find the closest matching button text by Levenshtein distance
+ * Helps suggest corrections when button text has changed
+ */
+function findClosestButtonMatch(searchText, buttons, threshold = 0.6) {
+  if (!buttons || buttons.length === 0) return null;
+  
+  let bestMatch = null;
+  let bestScore = threshold;
+  
+  buttons.forEach(btn => {
+    const distance = getLevenshteinDistance(
+      searchText.toLowerCase(),
+      btn.text.toLowerCase()
+    );
+    const maxLen = Math.max(searchText.length, btn.text.length);
+    const score = 1 - (distance / maxLen);
+    
+    if (score > bestScore) {
+      bestScore = score;
+      bestMatch = btn;
+    }
+  });
+  
+  return bestMatch;
+}
+
+/**
+ * Calculate Levenshtein distance between two strings
+ * Used for fuzzy matching of button text
+ */
+function getLevenshteinDistance(s1, s2) {
+  const len1 = s1.length;
+  const len2 = s2.length;
+  const matrix = Array(len2 + 1).fill(null).map(() => Array(len1 + 1).fill(0));
+  
+  for (let i = 0; i <= len1; i++) matrix[0][i] = i;
+  for (let j = 0; j <= len2; j++) matrix[j][0] = j;
+  
+  for (let j = 1; j <= len2; j++) {
+    for (let i = 1; i <= len1; i++) {
+      const cost = s1[i - 1] === s2[j - 1] ? 0 : 1;
+      matrix[j][i] = Math.min(
+        matrix[j][i - 1] + 1,      // insertion
+        matrix[j - 1][i] + 1,      // deletion
+        matrix[j - 1][i - 1] + cost // substitution
+      );
+    }
+  }
+  
+  return matrix[len2][len1];
 }
 
 /**
@@ -1809,6 +2077,477 @@ function detectFrontendChanges(testInfo, testCode) {
   changeAnalysis.detectionConfidence = Math.min(100, changeCount * 25);
 
   return changeAnalysis;
+}
+
+/**
+ * ==================== NEW: CSS CLASS CHANGE DETECTION ====================
+ * Analyze CSS class changes in Shadow DOM and other elements
+ */
+/**
+ * Calculate word similarity using multiple strategies:
+ * 1. Exact match (100%)
+ * 2. Prefix/suffix match (85%+)
+ * 3. Substring contains (75%+)
+ * 4. Edit distance / Levenshtein distance
+ */
+function calculateWordSimilarity(word1, word2) {
+  if (word1 === word2) return 1.0;
+  
+  const longer = word1.length > word2.length ? word1 : word2;
+  const shorter = word1.length > word2.length ? word2 : word1;
+  if (longer.length === 0) return 1.0;
+  
+  // Check if shorter word is a prefix of longer (e.g., 'click' in 'clickable')
+  if (longer.startsWith(shorter)) {
+    return 0.85;  // Strong similarity for prefix match
+  }
+  
+  // Check if shorter word is a suffix of longer
+  if (longer.endsWith(shorter)) {
+    return 0.80;  // Good similarity for suffix match
+  }
+  
+  // Check if shorter is contained in longer
+  if (longer.includes(shorter)) {
+    return 0.75;  // Moderate similarity for substring
+  }
+  
+  // Fallback to edit distance
+  const editDist = getEditDistance(longer, shorter);
+  return (longer.length - editDist) / longer.length;
+}
+
+function getEditDistance(s1, s2) {
+  const costs = [];
+  for (let i = 0; i <= s1.length; i++) {
+    let lastValue = i;
+    for (let j = 0; j <= s2.length; j++) {
+      if (i === 0) {
+        costs[j] = j;
+      } else if (j > 0) {
+        let newValue = costs[j - 1];
+        if (s1.charAt(i - 1) !== s2.charAt(j - 1)) {
+          newValue = Math.min(Math.min(newValue, lastValue), costs[j]) + 1;
+        }
+        costs[j - 1] = lastValue;
+        lastValue = newValue;
+      }
+    }
+    if (i > 0) costs[s2.length] = lastValue;
+  }
+  return costs[s2.length];
+}
+
+/**
+ * Calculate similarity between two class sets using Jaccard similarity
+ * Range: 0 (no overlap) to 1 (identical)
+ * Also considers word-level similarity for similar class names (e.g., 'clickable' vs 'click')
+ */
+function calculateClassSimilarity(testClasses, renderedClasses) {
+  const testSet = new Set(testClasses);
+  const renderedSet = new Set(renderedClasses);
+  
+  // First pass: exact matches
+  const exactMatches = [...testSet].filter(c => renderedSet.has(c)).length;
+  const totalClasses = new Set([...testSet, ...renderedSet]).size;
+  
+  // Second pass: check for similar class names (e.g., 'clickable' vs 'click')
+  let similarMatches = exactMatches;
+  const unmatchedTest = [...testSet].filter(c => !renderedSet.has(c));
+  const unmatchedRendered = [...renderedSet].filter(c => !testSet.has(c));
+  
+  for (const testClass of unmatchedTest) {
+    for (const renderedClass of unmatchedRendered) {
+      const wordSim = calculateWordSimilarity(testClass, renderedClass);
+      if (wordSim >= 0.70) {  // 70% word similarity = likely class name change (covers 'click' -> 'clickable')
+        similarMatches++;
+        unmatchedRendered.splice(unmatchedRendered.indexOf(renderedClass), 1);
+        break;
+      }
+    }
+  }
+  
+  return totalClasses === 0 ? 0 : similarMatches / totalClasses;
+}
+
+/**
+ * Find the closest matching class combination from rendered classes
+ * Handles: exact matches, class additions, class removals, and class changes
+ */
+function findClosestClassMatch(testSelector, testClasses, renderedClasses, similarity = 0.5) {
+  // Group rendered classes by their element tag/base class
+  const baseClass = testClasses[0];  // e.g., 'seat' from '.seat.available.clickable'
+  const classesWithBase = renderedClasses.filter(rendered => {
+    const renderedParts = rendered.split('.');
+    return renderedParts[0] === baseClass;  // Same first class (element type)
+  });
+  
+  if (classesWithBase.length === 0) {
+    return null;  // No classes with same base
+  }
+  
+  // Score each candidate by similarity
+  const scored = classesWithBase.map(rendered => {
+    const renderedParts = rendered.split('.');
+    const sim = calculateClassSimilarity(testClasses, renderedParts);
+    
+    // Determine change type
+    let changeType = 'SIMILAR';
+    const commonClasses = testClasses.filter(tc => renderedParts.includes(tc));
+    const addedClasses = renderedParts.filter(rc => !testClasses.includes(rc));
+    const removedClasses = testClasses.filter(tc => !renderedParts.includes(tc));
+    
+    if (addedClasses.length > 0 && removedClasses.length === 0) {
+      changeType = 'ADDED_CLASSES';
+    } else if (removedClasses.length > 0 && addedClasses.length === 0) {
+      changeType = 'REMOVED_CLASSES';
+    } else if (addedClasses.length > 0 && removedClasses.length > 0) {
+      changeType = 'CHANGED_CLASSES';
+    }
+    
+    return {
+      rendered,
+      similarity: sim,
+      commonClasses,
+      addedClasses,
+      removedClasses,
+      changeType
+    };
+  });
+  
+  // Sort by similarity (highest first)
+  scored.sort((a, b) => b.similarity - a.similarity);
+  
+  // Return best match if similarity exceeds threshold
+  const bestMatch = scored[0];
+  if (bestMatch.similarity >= similarity) {
+    return bestMatch;
+  }
+  
+  return null;  // No sufficiently similar match
+}
+
+function analyzeClassCombinations(testCode, traceElements) {
+  if (!traceElements || traceElements.cssClasses.length === 0) {
+    return {
+      testSelectors: [],
+      renderedClasses: [],
+      classMatches: [],
+      mismatches: [],
+      suggestions: [],
+      summary: 'No CSS class information available'
+    };
+  }
+
+  const analysis = {
+    testSelectors: [],
+    renderedClasses: traceElements.cssClasses,
+    classMatches: [],
+    mismatches: [],
+    suggestions: []
+  };
+
+  // Extract CSS selectors from test code (both page.locator and nested patterns)
+  const selectorPatterns = [
+    /page\.locator\(["']([^"']*?)["']\)\.locator\(["']([^"']*?)["']\)/g,  // nested: page.locator('parent').locator('.child')
+    /page\.locator\(["'](\.[^"']+?)["']\)/g,                              // page.locator('.className')
+    /locator\(["'](\.[^"']+?)["']\)/g,                                    // locator('.className')
+  ];
+
+  const extractedSelectors = new Set();
+  selectorPatterns.forEach(pattern => {
+    let match;
+    while ((match = pattern.exec(testCode)) !== null) {
+      // Get the last captured group (the actual selector)
+      const selector = match[match.length - 1];
+      if (selector) {
+        extractedSelectors.add(selector.startsWith('.') ? selector : '.' + selector);
+      }
+    }
+  });
+
+  analysis.testSelectors = Array.from(extractedSelectors);
+
+  // Compare each test selector against rendered classes
+  analysis.testSelectors.forEach(testSelector => {
+    const testClasses = testSelector.split('.').filter(c => c);
+    const classStr = testClasses.join('.');
+    
+    if (HEALER_VERBOSE) {
+      console.log(`   📍 Testing selector: ${testSelector}`);
+      console.log(`      Classes: [${testClasses.join(', ')}]`);
+    }
+
+    // Look for exact matches
+    const exactMatch = traceElements.cssClasses.find(rendered => 
+      rendered === classStr
+    );
+
+    if (exactMatch) {
+      analysis.classMatches.push({
+        testSelector,
+        rendered: exactMatch,
+        status: 'EXACT_MATCH',
+        confidence: 'high'
+      });
+      if (HEALER_VERBOSE) console.log(`      ✅ Exact match found: ${exactMatch}`);
+    } else {
+      // Look for partial matches - test selector is subset of rendered
+      const partialMatches = traceElements.cssClasses.filter(rendered => {
+        const renderedClasses = rendered.split('.');
+        return testClasses.every(tc => renderedClasses.includes(tc));
+      });
+      
+      if (HEALER_VERBOSE && partialMatches.length > 0) {
+        console.log(`      🔶 Partial match found (classes added): [${partialMatches.join(', ')}]`);
+      }
+
+      if (partialMatches.length > 0) {
+        // Classes were added
+        analysis.mismatches.push({
+          testSelector,
+          testClasses,
+          renderedMatches: partialMatches,
+          status: 'PARTIAL_MATCH',
+          confidence: 'high',
+          changeType: 'ADDED_CLASSES',
+          issue: `Test uses "${testSelector}" but actual classes include additional classes`,
+          suggestion: `Use "${partialMatches[0]}" (adds missing classes: ${
+            partialMatches[0].split('.').filter(c => !testClasses.includes(c)).join(', ')
+          })`
+        });
+
+        analysis.suggestions.push({
+          original: testSelector,
+          suggested: partialMatches[0],
+          changeType: 'ADDED_CLASSES',
+          reason: `Add missing class(es): ${
+            partialMatches[0].split('.').filter(c => !testClasses.includes(c)).join(', ')
+          }`,
+          confidence: 95
+        });
+      } else {
+        // NEW: Look for similar matches (class changes/replacements)
+        const closestMatch = findClosestClassMatch(testSelector, testClasses, traceElements.cssClasses, 0.5);
+        
+        if (HEALER_VERBOSE && closestMatch) {
+          console.log(`      ✨ Closest match found: ${closestMatch.rendered}`);
+          console.log(`         Similarity: ${(closestMatch.similarity * 100).toFixed(1)}%`);
+          console.log(`         Common: [${closestMatch.commonClasses.join(', ')}]`);
+          console.log(`         Added: [${closestMatch.addedClasses.join(', ')}]`);
+          console.log(`         Removed: [${closestMatch.removedClasses.join(', ')}]`);
+          console.log(`         Change type: ${closestMatch.changeType}`);
+        }
+        
+        if (closestMatch && closestMatch.similarity > 0.6) {
+          // Found a similar match - likely class change
+          const changeDescription = closestMatch.changeType === 'ADDED_CLASSES' 
+            ? `added class(es): ${closestMatch.addedClasses.join(', ')}`
+            : closestMatch.changeType === 'REMOVED_CLASSES'
+            ? `removed class(es): ${closestMatch.removedClasses.join(', ')}`
+            : `changed classes: removed ${closestMatch.removedClasses.join(', ')}, added ${closestMatch.addedClasses.join(', ')}`;
+          
+          analysis.mismatches.push({
+            testSelector,
+            testClasses,
+            renderedMatches: [closestMatch.rendered],
+            status: 'SIMILAR_MATCH',
+            changeType: closestMatch.changeType,
+            confidence: 'high',
+            similarity: closestMatch.similarity,
+            issue: `Test selector "${testSelector}" changed - ${changeDescription}`,
+            suggestion: `Use "${closestMatch.rendered}" (${changeDescription})`,
+            commonClasses: closestMatch.commonClasses,
+            addedClasses: closestMatch.addedClasses,
+            removedClasses: closestMatch.removedClasses
+          });
+
+          analysis.suggestions.push({
+            original: testSelector,
+            suggested: closestMatch.rendered,
+            changeType: closestMatch.changeType,
+            reason: changeDescription,
+            confidence: Math.round(closestMatch.similarity * 100)
+          });
+        } else {
+          // No match - selector completely broken
+          analysis.mismatches.push({
+            testSelector,
+            testClasses,
+            status: 'NO_MATCH',
+            confidence: 'high',
+            issue: `Test selector "${testSelector}" not found in rendered elements`,
+            availableSelectors: traceElements.cssClasses.slice(0, 5).join(', ')
+          });
+        }
+      }
+    }
+  });
+
+  if (HEALER_VERBOSE && analysis.mismatches.length > 0) {
+    console.log(`🔍 CSS Class Analysis: ${analysis.classMatches.length} matches, ${analysis.mismatches.length} mismatches found`);
+    analysis.mismatches.forEach(m => console.log(`   - ${m.testSelector}: ${m.issue} (confidence: ${m.confidence})`));
+  }
+
+  return analysis;
+}
+
+/**
+ * Detect CSS class changes in Shadow DOM and DOM elements
+ * Returns specific recommendations for class-based selector updates
+ * Handles: additions, removals, and replacements
+ */
+function detectClassChanges(testCode, traceElements, testInfo) {
+  const classAnalysis = {
+    hasClassChanges: false,
+    changedSelectors: [],
+    confidence: 0,
+    needsUpdate: false,
+    updateType: null,
+    details: {}
+  };
+
+  if (!traceElements || traceElements.cssClasses.length === 0) {
+    return classAnalysis;  // No trace data available
+  }
+
+  // Analyze class combinations
+  const combinations = analyzeClassCombinations(testCode, traceElements);
+  
+  classAnalysis.details = combinations;
+
+  // If there are mismatches, we have class changes
+  if (combinations.mismatches.length > 0) {
+    classAnalysis.hasClassChanges = true;
+    classAnalysis.needsUpdate = true;
+    
+    combinations.mismatches.forEach(mismatch => {
+      if (mismatch.status === 'PARTIAL_MATCH') {
+        // Classes were added to selector
+        classAnalysis.updateType = 'CLASS_ADDITION';
+        classAnalysis.changedSelectors.push({
+          current: mismatch.testSelector,
+          suggested: mismatch.suggestion,
+          missingClasses: mismatch.renderedMatches[0].split('.')
+            .filter(c => !mismatch.testClasses.includes(c)),
+          confidence: 95,
+          type: 'class_addition',
+          changeType: 'ADDED_CLASSES'
+        });
+      } else if (mismatch.status === 'SIMILAR_MATCH') {
+        // Classes changed (added, removed, or replaced)
+        const changeType = mismatch.changeType || 'CHANGED_CLASSES';
+        classAnalysis.updateType = 'CLASS_CHANGE';
+        
+        classAnalysis.changedSelectors.push({
+          current: mismatch.testSelector,
+          suggested: mismatch.suggestion,
+          addedClasses: mismatch.addedClasses || [],
+          removedClasses: mismatch.removedClasses || [],
+          confidence: Math.round((mismatch.similarity || 0.7) * 100),
+          type: 'class_change',
+          changeType: changeType,
+          reason: mismatch.issue
+        });
+      } else if (mismatch.status === 'NO_MATCH') {
+        // Selector completely broken
+        classAnalysis.changedSelectors.push({
+          current: mismatch.testSelector,
+          status: 'BROKEN',
+          availableOptions: traceElements.cssClasses.slice(0, 3),
+          confidence: 50,
+          type: 'selector_broken'
+        });
+      }
+    });
+
+    // Calculate overall confidence (prioritize high-confidence matches)
+    const highConfidence = classAnalysis.changedSelectors.filter(s => s.confidence >= 90).length;
+    const mediumConfidence = classAnalysis.changedSelectors.filter(s => s.confidence >= 70 && s.confidence < 90).length;
+    classAnalysis.confidence = Math.min(100, 
+      (highConfidence * 1.0 + mediumConfidence * 0.7) / Math.max(1, classAnalysis.changedSelectors.length) * 100
+    );
+  }
+
+  // Check if error message hints at class issues
+  if (testInfo && testInfo.error) {
+    const errorLower = testInfo.error.toLowerCase();
+    if (errorLower.includes('0 found') || errorLower.includes('resolved to 0 elements')) {
+      classAnalysis.hasClassChanges = true;
+      classAnalysis.needsUpdate = true;
+      classAnalysis.confidence = Math.max(classAnalysis.confidence, 70);
+    }
+  }
+
+  return classAnalysis;
+}
+
+/**
+ * Generate CSS class change guidance for Gemini prompt
+ */
+function generateClassChangeGuidance(classChanges) {
+  if (!classChanges || !classChanges.hasClassChanges) {
+    return '';
+  }
+
+  let guidance = '\n\n### 📋 CSS CLASS CHANGES DETECTED IN RENDERED ELEMENTS\n';
+  guidance += `**Number of selectors affected:** ${classChanges.changedSelectors.length}\n`;
+  guidance += `**Overall Confidence:** ${classChanges.confidence.toFixed(0)}%\n`;
+  guidance += `**Update Type:** ${classChanges.updateType}\n\n`;
+
+  if (classChanges.changedSelectors.length > 0) {
+    guidance += '**Selector Changes Required:**\n';
+    classChanges.changedSelectors.forEach((change, idx) => {
+      if (change.type === 'class_addition') {
+        guidance += `\n${idx + 1}. ✏️ **CLASS ADDITION**\n`;
+        guidance += `   **Current:** \`${change.current}\`\n`;
+        guidance += `   **Suggested:** \`${change.suggested}\`\n`;
+        guidance += `   **Missing Classes:** ${change.missingClasses.map(c => `\`${c}\``).join(', ')}\n`;
+        guidance += `   **Confidence:** ${change.confidence}%\n`;
+        guidance += `   **Action:** Add the missing class(es) to the selector\n`;
+      } else if (change.type === 'class_change') {
+        guidance += `\n${idx + 1}. 🔄 **CLASS CHANGE** (${change.changeType})\n`;
+        guidance += `   **Current:** \`${change.current}\`\n`;
+        guidance += `   **Suggested:** \`${change.suggested}\`\n`;
+        guidance += `   **Confidence:** ${change.confidence}%\n`;
+        if (change.removedClasses && change.removedClasses.length > 0) {
+          guidance += `   **Removed Classes:** ${change.removedClasses.map(c => `\`${c}\``).join(', ')}\n`;
+        }
+        if (change.addedClasses && change.addedClasses.length > 0) {
+          guidance += `   **Added Classes:** ${change.addedClasses.map(c => `\`${c}\``).join(', ')}\n`;
+        }
+        guidance += `   **Reason:** ${change.reason}\n`;
+        guidance += `   **Action:** Update the selector to use the new class combination\n`;
+      } else if (change.type === 'selector_broken') {
+        guidance += `\n${idx + 1}. ❌ **SELECTOR BROKEN**\n`;
+        guidance += `   **Current:** \`${change.current}\`\n`;
+        guidance += `   **Status:** Not found in rendered elements (0 elements)\n`;
+        guidance += `   **Confidence:** ${change.confidence}%\n`;
+        guidance += `   **Available similar selectors (suggestions):**\n`;
+        change.availableOptions.forEach(opt => {
+          guidance += `     - \`${opt}\`\n`;
+        });
+      }
+    });
+  }
+
+  if (classChanges.details && classChanges.details.renderedClasses.length > 0) {
+    guidance += `\n**All CSS classes found in rendered elements (first 15):**\n`;
+    classChanges.details.renderedClasses.slice(0, 15).forEach(cls => {
+      guidance += `- \`${cls}\`\n`;
+    });
+  }
+
+  guidance += `\n**CRITICAL RULE:** Always use CSS class combinations that match the rendered elements.\n`;
+  guidance += `Examples of class changes:\n`;
+  guidance += `- Class added: \`.available\` → \`.available.clickable\` (add \`clickable\`)\n`;
+  guidance += `- Class removed: \`.available.clickable\` → \`.available\` (remove \`clickable\`)\n`;
+  guidance += `- Class changed: \`.available.clickable\` → \`.available.click\` (replace \`clickable\` with \`click\`)\n`;
+
+  if (HEALER_VERBOSE) {
+    console.log(`%c "AI Log - Generated Class Change Guidance:" ${guidance}`, 'color: #ff8c00da; font-weight: bold;');
+  }
+  return guidance;
 }
 
 /**
@@ -1895,13 +2634,13 @@ function extractHealerDecision(geminiResponse) {
   
   if (match) {
     const decision = match[1];
-    const validDecisions = ['FRONTEND_BUG', 'UPDATE_TEST', 'UPDATE_SELECTOR', 'UPDATE_TEXT', 'ARCHITECTURAL_FIX', 'MANUAL_REVIEW'];
+    const validDecisions = ['FRONTEND_BUG', 'UPDATE_TEST', 'UPDATE_SELECTOR', 'UPDATE_TEXT', 'SELECTOR_CLASS_UPDATE', 'ARCHITECTURAL_FIX', 'MANUAL_REVIEW'];
     
     if (validDecisions.includes(decision)) {
       return {
         decision,
         reasoning: extractReasoningFromResponse(geminiResponse),
-        isAutoFixable: ['UPDATE_TEST', 'UPDATE_SELECTOR', 'UPDATE_TEXT', 'ARCHITECTURAL_FIX'].includes(decision),
+        isAutoFixable: ['UPDATE_TEST', 'UPDATE_SELECTOR', 'UPDATE_TEXT', 'SELECTOR_CLASS_UPDATE', 'ARCHITECTURAL_FIX'].includes(decision),
         confidence: calculateConfidenceFromResponse(geminiResponse)
       };
     }
@@ -2141,6 +2880,15 @@ function extractUIElementsFromSourceCode(filePath) {
         }
       }
 
+      // Capture button child text from JSX buttons like <button>Save</button> or Material UI <Button>Continue</Button>
+      const jsxButtonTextMatches = code.matchAll(/<(?:button|Button)(?:[^>]*)>([\s\S]*?)<\/(?:button|Button)>/gi);
+      for (const match of jsxButtonTextMatches) {
+        const innerText = match[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+        if (innerText && !extracted.buttons.includes(innerText)) {
+          extracted.buttons.push(innerText);
+        }
+      }
+
       const headingMatches = code.matchAll(UI_ELEMENT_PATTERNS.headings);
       for (const match of headingMatches) {
         if (match[1] && !extracted.headings.includes(match[1])) {
@@ -2326,6 +3074,43 @@ function generateAnalysisPrompt(testInfo, testCode) {
   const domIssues = detectDOMArchitectureIssues(sanitizedTestCode, sanitizedError);
   const domArchitectureGuidance = generateDOMArchitectureGuidance(domIssues);
   const isDOMError = isDOMArchitectureError(sanitizedError, sanitizedTestCode);
+  
+  // NEW: Detect CSS class changes in rendered elements
+  // Use ORIGINAL testCode for selector extraction (not sanitized, since regex needs real quotes)
+  const classChanges = detectClassChanges(testCode, traceElements, testInfo);
+  
+  // NEW: FALLBACK - Extract CSS classes from source code if trace didn't find them
+  // (Important for Shadow DOM components that aren't captured in trace snapshots)
+  let sourceCodeClasses = { cssClasses: [], sourceFile: null };
+  if (!classChanges.hasClassChanges || (traceElements && traceElements.cssClasses.length === 0)) {
+    if (HEALER_VERBOSE) console.log(`\n📊 Trace returned ${traceElements?.cssClasses?.length || 0} classes. Attempting source code fallback...`);
+    sourceCodeClasses = extractCSSClassesFromSourceCode(testCode, testInfo.file);
+    if (HEALER_VERBOSE) console.log(`📝 Source code extraction returned ${sourceCodeClasses.cssClasses.length} class combinations`);
+    
+    // If source code has CSS classes, use them to enhance class change detection
+    if (sourceCodeClasses.cssClasses.length > 0) {
+      if (HEALER_VERBOSE) console.log(`🔄 Re-analyzing with source code classes...`);
+      // Re-analyze with source code classes (use original testCode for regex matching)
+      const enhancedTrace = {
+        ...traceElements,
+        cssClasses: sourceCodeClasses.cssClasses
+      };
+      const enhancedClassChanges = detectClassChanges(testCode, enhancedTrace, testInfo);
+      if (HEALER_VERBOSE) console.log(`✨ Enhanced detection found ${enhancedClassChanges.changedSelectors.length} selector issues`);
+      
+      // Use enhanced detection if it found changes
+      if (enhancedClassChanges.hasClassChanges && !classChanges.hasClassChanges) {
+        Object.assign(classChanges, enhancedClassChanges);
+        if (HEALER_VERBOSE) {
+          console.log(`✅ CSS class changes detected via source code analysis:`);
+          console.log(`   - Base classes: ${sourceCodeClasses.baseClasses.join(', ')}`);
+          console.log(`   - Affected selectors: ${enhancedClassChanges.changedSelectors.map(s => s.current).join(', ')}`);
+        }
+      }
+    } else if (HEALER_VERBOSE) {
+      console.log(`⚠️  Source code extraction found no CSS classes`);
+    }
+  }
 
   // NEW: Add UI element context to prompt if available
   let uiElementContext = '';
@@ -2451,6 +3236,13 @@ ${fixSuggestion.actions.map(a => `- ${a}`).join('\n')}
 → **TEST_UPDATE**: YES - Update text in assertion
 → Include: \`DECISION: UPDATE_TEXT\` in response
 
+**ELSE IF** (CSS class changes - selector finds 0 elements but classes changed):
+→ **DECISION: SELECTOR_CLASS_UPDATE**
+→ **ACTION**: Update selector with missing CSS classes
+→ **TEST_UPDATE**: YES - Add missing classes to selector
+→ **EXAMPLE**: Change \`.seat.available\` to \`.seat.available.clickable\`
+→ Include: \`DECISION: SELECTOR_CLASS_UPDATE\` in response
+
 **ELSE IF** (DOM architecture issue - Shadow DOM, iframe):
 → **DECISION: ARCHITECTURAL_FIX**
 → **ACTION**: Apply Shadow DOM piercing or iframe handling
@@ -2458,7 +3250,7 @@ ${fixSuggestion.actions.map(a => `- ${a}`).join('\n')}
 → Include: \`DECISION: ARCHITECTURAL_FIX\` in response
 
 ### CRITICAL REQUIREMENTS:
-1. **Always include your DECISION at start of response** (FRONTEND_BUG, UPDATE_TEST, UPDATE_SELECTOR, UPDATE_TEXT, ARCHITECTURAL_FIX)
+1. **Always include your DECISION at start of response** (FRONTEND_BUG, UPDATE_TEST, UPDATE_SELECTOR, UPDATE_TEXT, SELECTOR_CLASS_UPDATE, ARCHITECTURAL_FIX)
 2. **Provide complete fixed code if TEST_UPDATE is YES**
 3. **Explain your reasoning for the decision**
 4. **For UPDATE_TEST: Include the exact new assertion/selector**
@@ -2467,6 +3259,9 @@ ${fixSuggestion.actions.map(a => `- ${a}`).join('\n')}
 `;
 console.log(`%c "AI Log - Behavioral Guidance:" ${behavioralGuidance}`, 'color: #1e80ffe5; font-weight: bold;');
   }
+
+  // NEW: Generate class change guidance
+  const classChangeGuidance = generateClassChangeGuidance(classChanges);
 
   return `You are an expert Playwright test automation engineer specializing in:
 1. **Fixing broken tests due to frontend changes** (selectors, URLs, text, design)
@@ -2524,6 +3319,8 @@ ${uiElementContext}
 ${selectorGuidance}
 
 ${buttonTextGuidance}
+
+${classChangeGuidance}
 
 ${behavioralGuidance}
 
@@ -2609,24 +3406,19 @@ ${isDOMError ? '\n6. DOM ARCHITECTURE ISSUE DETECTED: Apply DOM architecture fix
 `;
 }
 
-async function analyzeWithGemini(testInfo, testCode, retryCount = 0) {
+async function analyzeWithGemini(testInfo, testCode, classChanges = null, retryCount = 0) {
   try {
     await rateLimitAndWait();
     
-    const model = genAI.getGenerativeModel({
-      model: 'gemini-2.5-flash',
-    });
-
-    const prompt = generateAnalysisPrompt(testInfo, testCode);
+    const prompt = generateAnalysisPrompt(testInfo, testCode, classChanges);
     console.log('📡 Sending to Gemini API for analysis...');
     
-    const analysisPromise = model.generateContent({
-      contents: [
-        {
-          role: 'user',
-          parts: [{ text: prompt }]
-        }
-      ],
+    const analysisPromise = genAI.models.generateContent({
+      model: 'gemini-3.1-flash-lite',
+      contents: [{
+        role: 'user',
+        parts: [{ text: prompt }]
+      }],
       generationConfig: {
         temperature: 0.7,
         topK: 40,
@@ -2640,8 +3432,7 @@ async function analyzeWithGemini(testInfo, testCode, retryCount = 0) {
     });
     
     const result = await Promise.race([analysisPromise, timeoutPromise]);
-    const response = await result.response;
-    return response.text();
+    return result.candidates[0]?.content?.parts[0]?.text || null;
   } catch (err) {
     console.error('❌ Gemini API error:', err.message);
     
@@ -2649,7 +3440,7 @@ async function analyzeWithGemini(testInfo, testCode, retryCount = 0) {
       const backoffMs = Math.pow(2, retryCount) * 1000;
       console.log(`🔄 Retrying in ${backoffMs}ms... (attempt ${retryCount + 1}/${HEALER_MAX_RETRIES})`);
       await new Promise(resolve => setTimeout(resolve, backoffMs));
-      return analyzeWithGemini(testInfo, testCode, retryCount + 1);
+      return analyzeWithGemini(testInfo, testCode, classChanges, retryCount + 1);
     }
     
     return null;
@@ -2843,39 +3634,76 @@ function applyFixes(filePath, fixedCode) {
       const originalContent = fs.readFileSync(validatedPath, 'utf-8');
       const lines = originalContent.split('\n');
       
-      // Extract the variable name and pattern to find from the fixed code
-      // e.g., "const seatButtons = page.locator('seat-grid').locator('.seat.available');"
-      const varMatch = fixedCode.match(/const\s+(\w+)\s*=/);
-      if (varMatch) {
-        const varName = varMatch[1];
-        // Find the line that declares this variable in the original file
-        const lineIndex = lines.findIndex(line => line.includes(`const ${varName}`));
-        if (lineIndex >= 0) {
-          // Replace that line with the fixed code
-          lines[lineIndex] = fixedCode.trim();
-          const modifiedContent = lines.join('\n');
-          writeSuccess = atomicFileWrite(validatedPath, modifiedContent);
-          console.log(`✅ Partial fix applied: Updated locator for '${varName}'`);
-        } else {
-          console.warn(`⚠️  Could not find variable '${varName}' in original file, writing full replacement`);
-          writeSuccess = atomicFileWrite(validatedPath, fixedCode);
-        }
+      // NEW: Check if this is a CSS class-only change (e.g., .seat.available → .seat.available.clickable)
+      const classChangePattern = /locator\(["']([^"']*\.[^"']+)["']\)/g;
+      const classMatches = Array.from(fixedCode.matchAll(classChangePattern));
+      
+      let modifiedContent = originalContent;
+      let classChangesApplied = 0;
+      
+      if (classMatches.length > 0) {
+        // This is a CSS class selector change
+        classMatches.forEach(match => {
+          const newSelector = match[1];
+          const searchPattern = /locator\(["']([^"']*\.[^"']+)["']\)/;
+          const existingMatch = originalContent.match(searchPattern);
+          
+          if (existingMatch) {
+            const oldSelector = existingMatch[1];
+            // Only replace if it looks like a class change (both start with same base)
+            const oldClasses = oldSelector.split('.').filter(c => c);
+            const newClasses = newSelector.split('.').filter(c => c);
+            
+            if (oldClasses.length > 0 && newClasses.length > 0 && 
+                oldClasses[0] === newClasses[0]) {  // Same base class
+              modifiedContent = modifiedContent.replace(
+                new RegExp(`locator\\(["']${oldSelector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["']\\)`, 'g'),
+                `locator('${newSelector}')`
+              );
+              classChangesApplied++;
+              console.log(`✅ CSS class update: "${oldSelector}" → "${newSelector}"`);
+            }
+          }
+        });
+      }
+      
+      if (classChangesApplied > 0) {
+        writeSuccess = atomicFileWrite(validatedPath, modifiedContent);
+        console.log(`✅ Partial fix applied: Updated ${classChangesApplied} CSS class selector(s)`);
       } else {
-        // If we can't parse it as a const declaration, try to find and replace page.locator calls
-        const locatorMatches = fixedCode.match(/page\.locator\([^)]+\)\.locator\([^)]+\)/g);
-        if (locatorMatches && locatorMatches.length > 0) {
-          let modifiedContent = originalContent;
-          locatorMatches.forEach(locatorFix => {
-            // Simple replacement of locator patterns
-            modifiedContent = modifiedContent.replace(
-              /page\.locator\([^)]+\)/,
-              locatorFix
-            );
-          });
-          writeSuccess = atomicFileWrite(validatedPath, modifiedContent);
-          console.log('✅ Partial fix applied: Updated locator selectors');
+        // Fallback to variable matching if no class changes
+        const varMatch = fixedCode.match(/const\s+(\w+)\s*=/);
+        if (varMatch) {
+          const varName = varMatch[1];
+          // Find the line that declares this variable in the original file
+          const lineIndex = lines.findIndex(line => line.includes(`const ${varName}`));
+          if (lineIndex >= 0) {
+            // Replace that line with the fixed code
+            lines[lineIndex] = fixedCode.trim();
+            const modifiedContent = lines.join('\n');
+            writeSuccess = atomicFileWrite(validatedPath, modifiedContent);
+            console.log(`✅ Partial fix applied: Updated locator for '${varName}'`);
+          } else {
+            console.warn(`⚠️  Could not find variable '${varName}' in original file, writing full replacement`);
+            writeSuccess = atomicFileWrite(validatedPath, fixedCode);
+          }
         } else {
-          writeSuccess = atomicFileWrite(validatedPath, fixedCode);
+          // If we can't parse it as a const declaration, try to find and replace page.locator calls
+          const locatorMatches = fixedCode.match(/page\.locator\([^)]+\)\.locator\([^)]+\)/g);
+          if (locatorMatches && locatorMatches.length > 0) {
+            let modifiedContent = originalContent;
+            locatorMatches.forEach(locatorFix => {
+              // Simple replacement of locator patterns
+              modifiedContent = modifiedContent.replace(
+                /page\.locator\([^)]+\)/,
+                locatorFix
+              );
+            });
+            writeSuccess = atomicFileWrite(validatedPath, modifiedContent);
+            console.log('✅ Partial fix applied: Updated locator selectors');
+          } else {
+            writeSuccess = atomicFileWrite(validatedPath, fixedCode);
+          }
         }
       }
     } else {
@@ -3189,6 +4017,8 @@ function displayHealingSummary(healingResults) {
  */
 async function heal() {
   const options = parseArgs();
+  // Update HEALER_VERBOSE based on CLI --verbose flag
+  if (options.verbose) HEALER_VERBOSE = true;
   const startTime = Date.now();
   const healingResults = {
     totalTests: 0,

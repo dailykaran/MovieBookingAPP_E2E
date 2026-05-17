@@ -15,7 +15,7 @@
 import fs from 'fs';
 import path from 'path';
 import { execFileSync } from 'child_process';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 
@@ -44,7 +44,9 @@ if (!GEMINI_API_KEY_TEST) {
   process.exit(1);
 }
 
-const genAI = new GoogleGenerativeAI(GEMINI_API_KEY_TEST);
+const genAI = new GoogleGenAI({
+  apiKey: GEMINI_API_KEY_TEST,
+});
 
 /**
  * Classify error type to determine if it can be healed
@@ -146,10 +148,6 @@ function replaceTestBlock(fileContent, oldBlock, newBlock) {
  */
 async function analyzeTestBlock(testBlock) {
   try {
-    const model = genAI.getGenerativeModel({
-      model: 'gemini-2.5-flash'
-    });
-
     const prompt = `You are an expert Playwright test automation engineer. Fix this failing test block.
 
 CRITICAL: Start your response with: DECISION: [UPDATE_TEST, FRONTEND_BUG, UPDATE_SELECTOR, UPDATE_TEXT, or MANUAL_REVIEW]
@@ -199,7 +197,8 @@ IMPORTANT:
 
     console.log(`📡 Sending ${testBlock.name} to Gemini...`);
     
-    const result = await model.generateContent({
+    const result = await genAI.models.generateContent({
+      model: 'gemini-2.5-flash',
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
       generationConfig: {
         temperature: 0.7,
@@ -207,8 +206,7 @@ IMPORTANT:
       }
     });
 
-    const response = await result.response;
-    return response.text();
+    return result.candidates[0]?.content?.parts[0]?.text || null;
   } catch (err) {
     console.error(`❌ Gemini analysis failed:`, err.message);
     return null;
