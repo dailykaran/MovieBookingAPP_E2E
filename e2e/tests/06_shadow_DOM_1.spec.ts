@@ -13,8 +13,8 @@ test('Loading spinner appears during booking', async ({ page }) => {
     const seatGrid = page.locator('seat-grid'); 
     await expect(seatGrid).toBeAttached();
 
-    // 2. Target seats inside the Shadow DOM using updated class combination
-    // Source analysis confirms .seat.available.click is the correct selector
+    // 2. Target seats inside the Shadow DOM using the updated class combination
+    // Source analysis confirms .seat.available.click is the correct selector after class refactor
     const availableSeat = seatGrid.locator('.seat.available.click').first();
     
     await expect(availableSeat).toBeAttached();

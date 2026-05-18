@@ -125,7 +125,7 @@ const MovieDetails: React.FC = () => {
             onClick={() => navigate(-1)}
             sx={{ mt: 2 }}
           >
-            Go Back
+            Back to Movie Lists
           </Button>
         </Paper>
       </Container>
@@ -156,7 +156,7 @@ const MovieDetails: React.FC = () => {
             onClick={() => navigate(-1)}
             sx={{ mt: 2 }}
           >
-            Back to Movies Lists
+            Back to Movie Lists
           </Button>
         </Paper>
       </Container>
@@ -239,7 +239,7 @@ const MovieDetails: React.FC = () => {
         }}
         startIcon={<Typography>←</Typography>}
       >
-        Back to Movies Lists
+        Back to Movie Lists
       </Button>
       <Stack 
         direction={{ xs: 'column', md: 'row' }} 

@@ -1090,7 +1090,7 @@ function classifyErrorType(errorMessage) {
     return 'ASSERTION';
   }
   
-  // CRITICAL: Distinguish timeout types
+  // CRITICAL: Distinguish timeout types - FIXED: Better distinction
   if (lower.includes('timeout')) {
     // Check if it's a connection/infrastructure timeout (CANNOT be healed)
     if (lower.includes('waiting for') && lower.includes('connection')) {
@@ -1102,8 +1102,21 @@ function classifyErrorType(errorMessage) {
     if (lower.includes('browser') && lower.includes('closed')) {
       return 'INFRASTRUCTURE';
     }
+    if (lower.includes('websocket') || lower.includes('target closed')) {
+      return 'INFRASTRUCTURE';
+    }
     
-    // Otherwise it's an element/assertion timeout (CAN be healed by fixing selectors/timing)
+    // Check if it's toHaveURL() or other assertion timeout (CAN be healed)
+    if (lower.includes('toHaveURL') || lower.includes('toHave') || lower.includes('expect')) {
+      return 'TIMEOUT_ASSERTION';
+    }
+    
+    // Check if waiting for selector timeout (CAN be healed by fixing selector)
+    if (lower.includes('waiting for selector') || lower.includes('element') || lower.includes('locator')) {
+      return 'TIMEOUT_ASSERTION';
+    }
+    
+    // Otherwise treat as assertion timeout (safer assumption)
     return 'TIMEOUT_ASSERTION';
   }
   
@@ -1510,6 +1523,124 @@ function generateDOMArchitectureGuidance(domIssues) {
 
   console.log('AI Log - Generated DOM Architecture Guidance:', guidance);
   return guidance;
+}
+
+/**
+ * CRITICAL: Validate that fixed code uses proper Shadow DOM penetrating selectors
+ * This is the key function that prevents incorrect Shadow DOM fixes
+ */
+function validateShadowDOMFix(fixedCode, domIssues) {
+  const issues = [];
+  const warnings = [];
+
+  if (!domIssues || (!domIssues.hasShadowDOM && !domIssues.hasWebComponents && !domIssues.hasIframes)) {
+    return { isValid: true, issues: [], warnings: [] };
+  }
+
+  if (domIssues.hasShadowDOM) {
+    // Check for direct element access patterns (WRONG)
+    const directButtonAccess = /page\.locator\s*\(\s*["'](button|\.seat|\.available)[^)]*["']\s*\)/i.test(fixedCode);
+    const hasNestedLocator = /page\.locator\s*\([^)]+\)\s*\.locator\s*\([^)]+\)/i.test(fixedCode);
+
+    if (directButtonAccess && !hasNestedLocator) {
+      issues.push('CRITICAL: Using direct selector on Shadow DOM element - must use nested locator pattern');
+      issues.push('WRONG: page.locator("button") or page.locator(".seat")');
+      issues.push('RIGHT: page.locator("seat-grid").locator(".seat")');
+    }
+
+    // Check for :has-text pattern (UNRELIABLE)
+    if (/:has-text\s*\(/i.test(fixedCode) && /seat-grid/i.test(fixedCode)) {
+      warnings.push('WARNING: Using :has-text() in Shadow DOM is unreliable');
+      warnings.push('Better: Use CSS classes like .locator(".seat.available")');
+    }
+
+    // Check for getByRole on potential Shadow DOM
+    if (/getByRole\s*\(\s*["'](button|link)[^)]*["']\)/i.test(fixedCode) && 
+        /shadowElement|seat-grid|web-component/i.test(fixedCode)) {
+      issues.push('CRITICAL: getByRole() does not penetrate Shadow DOM boundaries');
+      issues.push('Use: page.locator("parent-selector").locator("child-selector")');
+    }
+
+    // Validate that nested locators exist and are properly formatted
+    if (hasNestedLocator) {
+      const nestedPattern = /page\.locator\s*\(\s*["']([^"']+)["']\s*\)\s*\.locator\s*\(\s*["']([^"']+)["']\s*\)/g;
+      let match;
+      let validCount = 0;
+
+      while ((match = nestedPattern.exec(fixedCode)) !== null) {
+        const childSelector = match[2];
+        // Prefer CSS classes over :has-text
+        if (!/:has-text|:has-css/.test(childSelector)) {
+          validCount++;
+        } else {
+          warnings.push(`Caution: Child selector uses complex filter: "${childSelector}"`);
+        }
+      }
+
+      if (validCount > 0) {
+        // Good - has nested locators with CSS
+      }
+    }
+  }
+
+  if (domIssues.hasIframes) {
+    if (!/frameLocator|page\.frame\s*\(/i.test(fixedCode)) {
+      issues.push('CRITICAL: iframe detected but fix does not use frameLocator() or page.frame()');
+      issues.push('Use: page.frameLocator("iframe-selector").locator("element")');
+    }
+  }
+
+  return {
+    isValid: issues.length === 0,
+    issues,
+    warnings,
+    isStrictValid: issues.length === 0 && warnings.length === 0
+  };
+}
+
+/**
+ * CRITICAL: Generate MANDATORY DOM architecture rules for Gemini prompt
+ * These override other guidance - must be followed
+ */
+function buildMandatoryDOMRules(domIssues) {
+  if (!domIssues || (!domIssues.hasShadowDOM && !domIssues.hasWebComponents && !domIssues.hasIframes)) {
+    return '';
+  }
+
+  let rules = '\n\n### 🚨 MANDATORY DOM ARCHITECTURE RULES (NOT SUGGESTIONS)\n';
+
+  if (domIssues.hasShadowDOM) {
+    rules += '\n**RULE: Shadow DOM Detected - These are HARD REQUIREMENTS:**\n\n';
+    rules += '❌ **YOU MUST NOT DO:**\n';
+    rules += '- page.locator("button") directly when buttons are inside seat-grid Shadow DOM\n';
+    rules += '- getByRole("button") on Shadow DOM elements\n';
+    rules += '- getByText() or :has-text() as the ONLY selector for Shadow DOM elements\n';
+    rules += '- Suggest a selector that does not penetrate the Shadow DOM boundary\n';
+    rules += '- Use direct class selector like page.locator(".seat") without parent\n\n';
+    rules += '✅ **YOU MUST DO:**\n';
+    rules += '- Use NESTED locators: page.locator("seat-grid").locator(".seat.available")\n';
+    rules += '- Use CSS classes in child selector: .locator(".seat.available")\n';
+    rules += '- Combine classes for specificity: .locator(".seat.available.clickable")\n';
+    rules += '- If you cannot fix with nested locators, respond DECISION: MANUAL_REVIEW\n\n';
+    rules += '**VALIDATION CHECKLIST:**\n';
+    rules += '1. Does your fix use page.locator("parent").locator("child") pattern? YES/NO\n';
+    rules += '2. Does it avoid getByRole/getByText on Shadow DOM? YES/NO\n';
+    rules += '3. Does it use CSS classes not :has-text? YES/NO\n\n';
+  }
+
+  if (domIssues.hasWebComponents) {
+    rules += '**RULE: Web Components Detected:**\n';
+    rules += '- Use nested locators for Web Component internals\n';
+    rules += '- Example: page.locator("custom-component").locator(".internal-selector")\n\n';
+  }
+
+  if (domIssues.hasIframes) {
+    rules += '**RULE: Iframes Detected:**\n';
+    rules += '- Use frameLocator(): page.frameLocator("iframe-selector").locator("element")\n';
+    rules += '- Prefer frameLocator over frame() for reliability\n\n';
+  }
+
+  return rules;
 }
 
 /**
@@ -1951,10 +2082,18 @@ function extractCSSClassesFromSourceCode(testCode, testFilePath) {
 
 /**
  * Find the closest matching button text by Levenshtein distance
- * Helps suggest corrections when button text has changed
+ * FIXED: Better matching for button text changes
  */
 function findClosestButtonMatch(searchText, buttons, threshold = 0.6) {
-  if (!buttons || buttons.length === 0) return null;
+  if (!buttons || buttons.length === 0) {
+    console.log(`AI Log - No buttons available to match against "${searchText}"`);
+    return null;
+  }
+  
+  // CRITICAL FIX: Log what buttons we're comparing against
+  if (HEALER_VERBOSE) {
+    console.log(`AI Log - Matching "${searchText}" against buttons: ${buttons.map(b => b.text).join(', ')}`);
+  }
   
   let bestMatch = null;
   let bestScore = threshold;
@@ -1965,13 +2104,21 @@ function findClosestButtonMatch(searchText, buttons, threshold = 0.6) {
       btn.text.toLowerCase()
     );
     const maxLen = Math.max(searchText.length, btn.text.length);
-    const score = 1 - (distance / maxLen);
+    const score = maxLen === 0 ? 1 : 1 - (distance / maxLen);
+    
+    if (HEALER_VERBOSE) {
+      console.log(`AI Log - Button comparison: "${btn.text}" score=${(score * 100).toFixed(1)}%`);
+    }
     
     if (score > bestScore) {
       bestScore = score;
       bestMatch = btn;
     }
   });
+  
+  if (bestMatch && HEALER_VERBOSE) {
+    console.log(`AI Log - Best match: "${bestMatch.text}" with ${(bestScore * 100).toFixed(1)}% confidence`);
+  }
   
   return bestMatch;
 }
@@ -2038,23 +2185,37 @@ function detectFrontendChanges(testInfo, testCode) {
     }
   }
 
-  // 2. SELECTOR CHANGE DETECTION (0 matching elements)
+  // 2. SELECTOR CHANGE DETECTION (0 matching elements) - FIXED: Better distinction
   if (/Locator\.locator|0 matching elements|did not find/i.test(testInfo.error)) {
-    changeAnalysis.selectorChanges.push({
-      type: 'element_not_found',
-      likely_cause: 'Selector outdated or element removed',
-      confidence: 'high'
-    });
+    // Check if this is actually an assertion timeout on toHaveURL
+    if (!/toHaveURL|Expected.*Received/i.test(testInfo.error)) {
+      changeAnalysis.selectorChanges.push({
+        type: 'element_not_found',
+        likely_cause: 'Selector outdated or element removed',
+        confidence: 'high'
+      });
+    }
   }
 
-  // 3. TEXT/ASSERTION MISMATCH
+  // 3. TEXT/ASSERTION MISMATCH - FIXED: Include URL mismatches
+  // Pattern: Expected: "http://..." Received: "http://..."
   const textMismatchPattern = /Expected.*text.*"(.*?)"\s*Received.*"(.*?)"|AssertionError.*text|expected.*text/i;
+  const urlMismatchPattern = /Expected:\s*["']([^"']+)["']\s*Received:\s*["']([^"']+)["']/i;
+  
   if (textMismatchPattern.test(testInfo.error)) {
     changeAnalysis.textChanges.push({
       type: 'text_content_changed',
       likely_cause: 'Button/label text updated in frontend',
       confidence: 'high'
     });
+  } else if (urlMismatchPattern.test(testInfo.error)) {
+    changeAnalysis.urlChange = {
+      expectedPath: testInfo.error.match(/Expected:\s*["']([^"']+)["']/)?.[1],
+      receivedPath: testInfo.error.match(/Received:\s*["']([^"']+)["']/)?.[1],
+      isTargeted: true,
+      isFrontendBug: false,
+      confidence: 'high'
+    };
   }
 
   // 4. LABEL/PLACEHOLDER CHANGE
@@ -2705,17 +2866,33 @@ function calculateConfidenceFromResponse(response) {
 
 /**
  * Extract what changed (URL, selector, text, etc.)
+ * CRITICAL FIX: Properly extract URLs from error messages first
  */
 function extractChangeDetails(geminiResponse, testInfo) {
   const changeDetails = {
     changeType: 'unknown',
     oldValue: null,
     newValue: null,
-    replacement: null
+    replacement: null,
+    urlFromError: null
   };
   
-  // URL Change
+  // URL Change Detection - FIXED: Check error message first for actual URL values
   const normalizedResponse = geminiResponse.replace(/\r\n/g, '\n');
+  
+  // CRITICAL: First, check error message in testInfo for actual URL values
+  if (testInfo && testInfo.error) {
+    // Pattern: Expected: "http://localhost:3000/movie/99" Received: "http://localhost:3000/movie/777"
+    const errorUrlMatch = testInfo.error.match(/Expected:\s*["']?([^"'\n]+)["']?\s*Received:\s*["']?([^"'\n]+)["']?/i);
+    if (errorUrlMatch) {
+      changeDetails.changeType = 'url';
+      changeDetails.urlFromError = { expected: errorUrlMatch[1], received: errorUrlMatch[2] };
+      changeDetails.oldValue = errorUrlMatch[1];
+      changeDetails.newValue = errorUrlMatch[2];
+      console.log(`AI Log - URL mismatch from error: Expected ${changeDetails.oldValue} but got ${changeDetails.newValue}`);
+    }
+  }
+  
   const oldUrlMatch = normalizedResponse.match(/Old\s+URL?:\s*["']?([^"'\n]+?)["']?(?=\s|$|,|;)/i);
   const newUrlMatch = normalizedResponse.match(/New\s+URL?:\s*["']?([^"'\n]+?)["']?(?=\s|$|,|;)/i);
   const expectedUrlMatch = normalizedResponse.match(/Expected\s+URL(?:\s*is|\s*to be|\s*:)\s*["']?([^"'\n]+?)["']?(?=\s|$|,|;)/i);
@@ -2723,10 +2900,11 @@ function extractChangeDetails(geminiResponse, testInfo) {
   const toHaveUrlMatch = normalizedResponse.match(/toHaveURL\(\s*["']([^"']+)["']\s*\)/i);
   const navigateUrlMatch = normalizedResponse.match(/navigate(?:d)?\s+to\s*["']([^"']+)["']/i);
 
-  if (oldUrlMatch || newUrlMatch || expectedUrlMatch || currentUrlMatch || toHaveUrlMatch || navigateUrlMatch) {
+  // Use Gemini response values if error extraction didn't work
+  if (!changeDetails.urlFromError && (oldUrlMatch || newUrlMatch || expectedUrlMatch || currentUrlMatch || toHaveUrlMatch || navigateUrlMatch)) {
     changeDetails.changeType = 'url';
-    changeDetails.oldValue = oldUrlMatch?.[1] || currentUrlMatch?.[1] || null;
-    changeDetails.newValue = newUrlMatch?.[1] || expectedUrlMatch?.[1] || toHaveUrlMatch?.[1] || navigateUrlMatch?.[1] || null;
+    changeDetails.oldValue = changeDetails.oldValue || oldUrlMatch?.[1] || currentUrlMatch?.[1] || null;
+    changeDetails.newValue = changeDetails.newValue || newUrlMatch?.[1] || expectedUrlMatch?.[1] || toHaveUrlMatch?.[1] || navigateUrlMatch?.[1] || null;
   }
   
   // Selector Change
@@ -3231,6 +3409,12 @@ function generateAnalysisPrompt(testInfo, testCode) {
     console.log('🔍 Analyzing Playwright trace for element information...');
     traceElements = extractElementsFromTrace(tracePath);
     console.log(`📋 Trace analysis results: ${traceElements.buttons.length} buttons, ${traceElements.inputs.length} inputs, ${traceElements.dialogs.length} dialogs extracted.`);
+    // CRITICAL FIX: Log extracted button details for debugging
+    if (HEALER_VERBOSE && traceElements.buttons.length > 0) {
+      console.log(`AI Log - Buttons extracted from trace: ${traceElements.buttons.map(b => `"${b.text}"`).join(', ')}`);
+    }
+  } else {
+    console.log('⚠️  Could not find trace file for test analysis');
   }
 
   const codeSizeCheck = validateTestCodeSize(testCode, 50000);
@@ -3342,6 +3526,9 @@ function generateAnalysisPrompt(testInfo, testCode) {
     classChangeGuidance,
     behavioralGuidance,
     domArchitectureGuidance,
+    
+    // NEW: Add mandatory DOM rules to enforce Shadow DOM, Web Component, and iframe best practices
+    ...(domIssues && (domIssues.hasShadowDOM || domIssues.hasWebComponents || domIssues.hasIframes) ? [buildMandatoryDOMRules(domIssues)] : []),
 
     `Error Type: ${sanitizedErrorType}
 Error Message:
@@ -4206,6 +4393,31 @@ async function heal() {
     const fixedCode = extractFixedCode(analysis);
     if (fixedCode) {
       console.log('\n✅ Fixed code extracted successfully');
+      
+      // NEW: Validate fix against DOM architecture rules BEFORE applying
+      if (domIssues && (domIssues.hasShadowDOM || domIssues.hasWebComponents || domIssues.hasIframes)) {
+        console.log('\n🔍 Validating fix against DOM architecture rules...');
+        const fixValidation = validateShadowDOMFix(fixedCode, domIssues);
+        
+        if (!fixValidation.isValid) {
+          console.log('❌ Fix validation FAILED:');
+          fixValidation.issues.forEach(issue => {
+            console.error(`  CRITICAL: ${issue}`);
+          });
+          testResult.failureReason = 'Fix violates DOM architecture rules';
+          testResult.backup = backup;
+          healingResults.tests.push(testResult);
+          continue;
+        }
+        
+        if (fixValidation.warnings.length > 0) {
+          console.log('⚠️  Warnings in fix (not blocking):');
+          fixValidation.warnings.forEach(warning => {
+            console.warn(`  ${warning}`);
+          });
+        }
+      }
+      
       testResult.fixedCode = fixedCode;
       testResult.decision = healerDecision.decision;
       testResult.changeType = changeDetails.changeType;

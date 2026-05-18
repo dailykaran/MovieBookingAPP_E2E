@@ -50,7 +50,7 @@ const MovieListWithIframe: React.FC = () => {
       {/* Iframe Section */}
       <IframeContainer>
         <Typography variant="h4" sx={{ marginBottom: 2, fontWeight: 'bold' }}>
-          🎬 Movie Viewer Showcase
+          🎬 Upcoming Movies List
         </Typography>
         
         <IframeWrapper>
@@ -63,7 +63,7 @@ const MovieListWithIframe: React.FC = () => {
 
           {/* Movie Details Iframe */}
           <IframeBox
-            title="showscase upcoming movies"
+            title="Upcoming Movies List"
             src="/movie-showcase.html"
             loading="lazy"
           />
