@@ -104,6 +104,9 @@ const YouTubeTrailer: React.FC<YouTubeTrailerProps> = ({
         >
           {/* YouTube iFrame with Security Sandbox */}
           <iframe
+            id="youtube-trailer-iframe"
+            name="youtube-trailer-iframe"
+            data-testid="new-youtube-trailer-iframe"
             title={`${movieTitle} Trailer`}
             src={embedUrl}
             style={{

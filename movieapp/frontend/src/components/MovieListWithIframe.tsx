@@ -63,6 +63,9 @@ const MovieListWithIframe: React.FC = () => {
 
           {/* Movie Details Iframe */}
           <IframeBox
+            id="movie-showcase-iframe"
+            name="movie-showcase-iframe"
+            data-testid="movie-showcase-iframe"
             title="Upcoming Movies List"
             src="/movie-showcase.html"
             loading="lazy"

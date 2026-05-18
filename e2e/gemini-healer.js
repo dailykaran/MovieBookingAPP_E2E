@@ -63,7 +63,6 @@ const REQUIRED_PACKAGES = ['@google/genai', '@playwright/test', 'dotenv'];
 
 // ============ SOURCE CODE ANALYSIS CONFIGURATION ============
 const HEALER_SOURCE_CODE_ANALYSIS = process.env.HEALER_SOURCE_CODE_ANALYSIS === 'true';
-const HEALER_SOURCE_CODE_WHITELIST = process.env.HEALER_SOURCE_CODE_WHITELIST || 'movieapp/frontend/src/components/**';
 const HEALER_SOURCE_CODE_MAX_FILE_SIZE = parseInt(process.env.HEALER_SOURCE_CODE_MAX_FILE_SIZE || '500000', 10); // 500KB
 const HEALER_SOURCE_CODE_MAX_EXTRACTION_SIZE = parseInt(process.env.HEALER_SOURCE_CODE_MAX_EXTRACTION_SIZE || '2097152', 10); // 2MB
 const MAX_SOURCE_CODE_FILES_PER_SESSION = parseInt(process.env.MAX_SOURCE_CODE_FILES_PER_SESSION || '20', 10);
@@ -1736,6 +1735,7 @@ function extractElementsFromTrace(tracePath) {
         buttons: [],
         inputs: [],
         dialogs: [],
+        iframes: [],
         htmlSnapshots: [],
         cssClasses: [],
         elementsByClass: {},
@@ -1750,6 +1750,7 @@ function extractElementsFromTrace(tracePath) {
       buttons: [],
       inputs: [],
       dialogs: [],
+      iframes: [],  // NEW: Track iframes with title, src, name
       htmlSnapshots: [],
       cssClasses: [],  // NEW: Track CSS class combinations
       elementsByClass: {}  // NEW: Map of class → elements
@@ -1843,6 +1844,42 @@ function extractElementsFromTrace(tracePath) {
             }
           }
           
+          // NEW: Extract iframe elements with title, src, name attributes
+          const iframeMatches = snapshot.str.matchAll(/<iframe[^>]*>/gi);
+          for (const match of iframeMatches) {
+            const attrs = match[0];
+            const titleMatch = attrs.match(/title="([^"]*)"/i);
+            const srcMatch = attrs.match(/src="([^"]*)"/i);
+            const nameMatch = attrs.match(/name="([^"]*)"/i);
+            const dataTestIdMatch = attrs.match(/data-testid="([^"]*)"/i);
+            
+            const title = titleMatch ? titleMatch[1] : null;
+            const src = srcMatch ? srcMatch[1] : null;
+            const name = nameMatch ? nameMatch[1] : null;
+            const dataTestId = dataTestIdMatch ? dataTestIdMatch[1] : null;
+            
+            if (title || src || name || dataTestId) {
+              result.iframes.push({
+                title,
+                src,
+                name,
+                dataTestId,
+                selector: title ? `iframe[title="${title}"]` : 
+                         dataTestId ? `iframe[data-testid="${dataTestId}"]` :
+                         name ? `iframe[name="${name}"]` :
+                         src ? `iframe[src*="${src.split('/').pop()}"]` : 'iframe',
+                html: match[0]
+              });
+            }
+          }
+          
+          if (HEALER_VERBOSE && result.iframes.length > 0) {
+            console.log(`   🎬 Extracted ${result.iframes.length} iframe(s) from trace`);
+            result.iframes.forEach(iframe => {
+              console.log(`      - ${iframe.selector}`);
+            });
+          }
+          
           result.htmlSnapshots.push(snapshot.str);
         }
       }
@@ -1854,7 +1891,7 @@ function extractElementsFromTrace(tracePath) {
     ).values());
     
     if (HEALER_VERBOSE) {
-      console.log(`📋 Extracted from trace: ${result.buttons.length} buttons, ${result.inputs.length} inputs, ${result.dialogs.length} dialogs, ${result.cssClasses.length} unique CSS class combinations`);
+      console.log(`📋 Extracted from trace: ${result.buttons.length} buttons, ${result.inputs.length} inputs, ${result.dialogs.length} dialogs, ${result.iframes.length} iframes, ${result.cssClasses.length} unique CSS class combinations`);
       if (result.cssClasses.length > 0) {
         console.log(`   🎨 CSS Classes found: ${result.cssClasses.slice(0, 5).join(', ')}${result.cssClasses.length > 5 ? '...' : ''}`);
       }
@@ -1867,12 +1904,185 @@ function extractElementsFromTrace(tracePath) {
       buttons: [],
       inputs: [],
       dialogs: [],
+      iframes: [],
       htmlSnapshots: [],
       cssClasses: [],
       elementsByClass: {},
       error: err.message
     };
   }
+}
+
+/**
+ * Calculate selector stability score for iframe attributes
+ * Returns: { score: 0-100, recommendation: string, reason: string }
+ */
+function assessIframeAttrStability(attr, value, other) {
+  if (!value) {
+    return { score: 0, recommendation: 'N/A', reason: 'Attribute not available' };
+  }
+
+  switch (attr) {
+    case 'title':
+      // Title is typically the semantic content - rarely changes
+      return {
+        score: 95,
+        recommendation: 'HIGHLY RECOMMENDED',
+        reason: 'Titles rarely change; semantic meaning stable across refactors'
+      };
+
+    case 'data-testid':
+      // Explicit test markers - very stable
+      return {
+        score: 90,
+        recommendation: 'RECOMMENDED',
+        reason: 'Explicit test ID; intentionally stable for testing'
+      };
+
+    case 'name':
+      // Name attribute can change during refactoring
+      return {
+        score: 65,
+        recommendation: 'ACCEPTABLE (Use with caution)',
+        reason: 'Name can change during refactoring; less stable than title/data-testid'
+      };
+
+    case 'id':
+      // IDs are commonly refactored
+      return {
+        score: 40,
+        recommendation: 'NOT RECOMMENDED',
+        reason: 'IDs frequently changed in refactors; high volatility'
+      };
+
+    case 'src':
+      // Source URLs are often stable for embedded content
+      return {
+        score: 80,
+        recommendation: 'ACCEPTABLE',
+        reason: 'Source URLs stable for embedded content'
+      };
+
+    default:
+      return { score: 50, recommendation: 'MARGINAL', reason: 'Unknown attribute stability' };
+  }
+}
+
+/**
+ * Generate iframe guidance for Gemini analysis with STABILITY ASSESSMENT
+ */
+function generateIframeGuidance(traceElements, testCode) {
+  if (!traceElements || !traceElements.iframes || traceElements.iframes.length === 0) {
+    return '';
+  }
+
+  // Extract iframe selectors from test code
+  const iframeSelectorsInTest = [];
+  const frameLocatorMatches = [...testCode.matchAll(/frameLocator\(\s*['"]([^'"]+)['"]\s*\)/gi)];
+  frameLocatorMatches.forEach(match => {
+    if (match[1]) iframeSelectorsInTest.push(match[1]);
+  });
+
+  let guidance = '\n### 🎬 IFRAME ELEMENTS DETECTED IN PAGE TRACE - WITH STABILITY ASSESSMENT:\n';
+  guidance += `**Available iframes from trace with recommended selectors (by stability):**\n\n`;
+
+  traceElements.iframes.forEach((iframe, idx) => {
+    guidance += `**${idx + 1}. Iframe:** ${iframe.title || 'Untitled'} \n`;
+    
+    // Build list of available selectors with stability scores
+    const selectorOptions = [];
+    if (iframe.title) {
+      const titleStability = assessIframeAttrStability('title', iframe.title);
+      selectorOptions.push({
+        selector: `iframe[title="${iframe.title}"]`,
+        attr: 'title',
+        value: iframe.title,
+        ...titleStability
+      });
+    }
+    if (iframe.dataTestId) {
+      const testIdStability = assessIframeAttrStability('data-testid', iframe.dataTestId);
+      selectorOptions.push({
+        selector: `iframe[data-testid="${iframe.dataTestId}"]`,
+        attr: 'data-testid',
+        value: iframe.dataTestId,
+        ...testIdStability
+      });
+    }
+    if (iframe.name) {
+      const nameStability = assessIframeAttrStability('name', iframe.name);
+      selectorOptions.push({
+        selector: `iframe[name="${iframe.name}"]`,
+        attr: 'name',
+        value: iframe.name,
+        ...nameStability
+      });
+    }
+    if (iframe.src) {
+      const srcStability = assessIframeAttrStability('src', iframe.src);
+      selectorOptions.push({
+        selector: `iframe[src*="${iframe.src.split('/').pop()}"]`,
+        attr: 'src',
+        value: iframe.src.substring(0, 30) + '...',
+        ...srcStability
+      });
+    }
+
+    // Sort by stability score (highest first)
+    selectorOptions.sort((a, b) => b.score - a.score);
+
+    // Display selectors with stability info
+    selectorOptions.forEach((option, sIdx) => {
+      const priority = sIdx === 0 ? '🥇 1ST CHOICE' : sIdx === 1 ? '🥈 2ND' : '🥉 3RD';
+      const scoreBar = '█'.repeat(Math.floor(option.score / 10)) + '░'.repeat(10 - Math.floor(option.score / 10));
+      guidance += `   ${priority}: ${option.recommendation}\n`;
+      guidance += `      Selector: \`${option.selector}\`\n`;
+      guidance += `      Stability: ${scoreBar} ${option.score}% - ${option.reason}\n\n`;
+    });
+  });
+
+  if (iframeSelectorsInTest.length > 0) {
+    guidance += `**Current iframe selectors in test code:**\n`;
+    iframeSelectorsInTest.forEach(selector => {
+      // Try to extract attribute type from selector
+      let attrType = 'unknown';
+      let attrValue = '';
+      
+      if (selector.includes('[title=')) {
+        attrType = 'title';
+        attrValue = selector.match(/\[title="([^"]+)"\]/)?.[1] || '';
+      } else if (selector.includes('[name=')) {
+        attrType = 'name';
+        attrValue = selector.match(/\[name="([^"]+)"\]/)?.[1] || '';
+      } else if (selector.includes('[id=')) {
+        attrType = 'id';
+        attrValue = selector.match(/\[id="([^"]+)"\]/)?.[1] || '';
+      } else if (selector.includes('[data-testid=')) {
+        attrType = 'data-testid';
+        attrValue = selector.match(/\[data-testid="([^"]+)"\]/)?.[1] || '';
+      }
+      
+      const matchingIframe = traceElements.iframes.find(iframe => {
+        if (attrType === 'title') return iframe.title === attrValue;
+        if (attrType === 'name') return iframe.name === attrValue;
+        if (attrType === 'data-testid') return iframe.dataTestId === attrValue;
+        return false;
+      });
+      
+      const status = matchingIframe ? '✅ FOUND' : '❌ NOT FOUND';
+      const stabilityAssess = assessIframeAttrStability(attrType, attrValue || 'exists');
+      const stabilityWarning = stabilityAssess.score < 70 ? ` ⚠️ (Low stability: ${stabilityAssess.reason})` : '';
+      
+      guidance += `  - \`${selector}\` → ${status}${stabilityWarning}\n`;
+    });
+  }
+
+  guidance += `\n**🎯 ACTION REQUIRED:**\n`;
+  guidance += `1. If selector not found (❌): Update test to use recommended selector from list above\n`;
+  guidance += `2. Prefer 🥇 choices (highest stability) to minimize test failures on refactors\n`;
+  guidance += `3. AVOID id-based selectors - they change frequently during development\n`;
+
+  return guidance;
 }
 
 /**
@@ -2278,29 +2488,8 @@ function calculateWordSimilarity(word1, word2) {
   }
   
   // Fallback to edit distance
-  const editDist = getEditDistance(longer, shorter);
+  const editDist = getLevenshteinDistance(longer, shorter);
   return (longer.length - editDist) / longer.length;
-}
-
-function getEditDistance(s1, s2) {
-  const costs = [];
-  for (let i = 0; i <= s1.length; i++) {
-    let lastValue = i;
-    for (let j = 0; j <= s2.length; j++) {
-      if (i === 0) {
-        costs[j] = j;
-      } else if (j > 0) {
-        let newValue = costs[j - 1];
-        if (s1.charAt(i - 1) !== s2.charAt(j - 1)) {
-          newValue = Math.min(Math.min(newValue, lastValue), costs[j]) + 1;
-        }
-        costs[j - 1] = lastValue;
-        lastValue = newValue;
-      }
-    }
-    if (i > 0) costs[s2.length] = lastValue;
-  }
-  return costs[s2.length];
 }
 
 /**
@@ -3209,17 +3398,6 @@ function sanitizeForLogging(data) {
 }
 
 /**
- * Add a value to an array only once.
- */
-function addUnique(array, value) {
-  if (!value) return;
-  const normalized = value.toString().trim();
-  if (normalized && !array.includes(normalized)) {
-    array.push(normalized);
-  }
-}
-
-/**
  * Extract labels and text patterns the test code is looking for.
  */
 function extractTestLabelsFromCode(testCode) {
@@ -3523,6 +3701,7 @@ function generateAnalysisPrompt(testInfo, testCode) {
     uiElementContext,
     selectorGuidance,
     buttonTextGuidance,
+    generateIframeGuidance(traceElements, testCode),  // NEW: Add iframe guidance
     classChangeGuidance,
     behavioralGuidance,
     domArchitectureGuidance,

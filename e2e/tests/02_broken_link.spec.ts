@@ -1,25 +1,25 @@
 import { test, expect } from '@playwright/test';
 
-test.describe('Frontend broken link button', () => {
+test.describe('Frontend navigation check', () => {
 
-  test('should navigate to the correct movie link when clicking "Book Now"', async ({ page }) => {
+  test('should navigate to the correct movie detail page when clicking "Book Now"', async ({ page }) => {
     const PORT = process.env.PORT || '3000'; 
     await page.goto(`http://localhost:${PORT}`);
     
-    // Use page.waitForLoadState('networkidle') only if necessary, 
-    // prefer specific element visibility for better performance
+    // Use locator first to ensure we target the specific button
     const bookNowButton = page.getByRole('button', { name: /Book Now/i }).first();
+
     await expect(bookNowButton).toBeVisible();
 
-    // Capture the click and wait for the URL to change to the expected pattern
-    // This makes the test resilient to changes in specific movie IDs
-    await Promise.all([
-      page.waitForURL(`**/movie/**`),
-      bookNowButton.click()
-    ]);
-
-    // Verify the URL structure instead of a hardcoded ID
-    await expect(page).toHaveURL(new RegExp(`http://localhost:${PORT}/movie/\\d+`));
+    // Perform action
+    await bookNowButton.click();
+   
+    // Use a regex pattern to verify the structure of the URL without hardcoding the ID
+    // This allows the test to pass even if the specific movie ID changes
+    await page.waitForURL(new RegExp(`http://localhost:${PORT}/movie/\\d+`));
+    
+    // Verify the URL matches the expected pattern
+    expect(page.url()).toMatch(new RegExp(`http://localhost:${PORT}/movie/\\d+`));
   });
 
 });
