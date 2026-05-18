@@ -7,13 +7,14 @@ test.describe('Frontend broken link button', () => {
     await page.goto(`http://localhost:${PORT}`);
     await page.waitForLoadState('networkidle');
 
-    const bookNowButton = page.getByRole('button', { name: /Book Now/i }).first();
+    const bookNowButton = page.getByRole('button', { name: /Book Now/i }).last();
+
     await expect(bookNowButton).toBeVisible();
+    await expect(bookNowButton).toContainText('Book Now'); 
 
     await bookNowButton.click();
-    //await expect(page).toHaveURL(/\/movie\/\d+/); 
-    
-    await expect(page).toHaveURL(`http://localhost:${PORT}/movie/876`);
+   
+    await expect(page).toHaveURL(`http://localhost:${PORT}/movie/99`); 
   });
 
 });

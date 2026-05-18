@@ -65,4 +65,3 @@ test('Loading spinner appears during booking', async ({ page }) => {
   await expect(page.locator('.MuiSnackbarContent-message').last()).toContainText('Booking code copied');
   await page.locator('.MuiSnackbarContent-message').last().waitFor({ state: 'detached', timeout: 1000 }); // timing load issue 500
 });
-

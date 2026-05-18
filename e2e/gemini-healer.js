@@ -135,7 +135,7 @@ let healingLogs = {
  * Generate unique session ID
  */
 function generateSessionId() {
-  return `healing-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  return `healing-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
 }
 
 /**
@@ -204,9 +204,11 @@ function logHealingEvent(eventType, elementName, failedLocator, workingLocator, 
  * Get current session statistics
  */
 function getSessionStatistics() {
+  const durationMs = new Date() - new Date(healingLogs.startTime);
+  const duration = new Date(durationMs).toISOString().slice(11, 19);
   return {
     ...healingLogs.statistics,
-    sessionDuration: new Date(new Date() - new Date(healingLogs.startTime)).toISOString().substr(11, 8),
+    sessionDuration: duration,
     totalLogEntries: healingLogs.events.length,
     eventTypes: healingLogs.events.reduce((acc, event) => {
       acc[event.eventType] = (acc[event.eventType] || 0) + 1;
@@ -725,7 +727,8 @@ async function rateLimitAndWait() {
   
   if (apiCallTimes.length >= HEALER_API_RATE_LIMIT) {
     const oldestCall = apiCallTimes[0];
-    const waitTime = Math.max(0, oneMinuteAgo - oldestCall + 1000);
+    const elapsedSinceOldest = now - oldestCall;
+    const waitTime = Math.max(0, 60000 - elapsedSinceOldest + 1000);
     if (waitTime > 0) {
       if (HEALER_VERBOSE) {
         console.log(`⏱️  Rate limit reached. Waiting ${(waitTime / 1000).toFixed(1)}s...`);
@@ -1037,10 +1040,10 @@ function extractTestInfo(spec) {
   // NEW: Classify error type using intelligent detection (CRITICAL FIX)
   const classifiedType = classifyErrorType(error);
 
-  console.log(`%c "AI Log - Extracted Error:" ${error}`, 'color: #ff4500da; font-weight: bold;');
-  console.log(`%c "AI Log - Classified Error Type:" ${classifiedType}`, 'color: #1e90ffda; font-weight: bold;');
-  console.log(`%c "AI Log - Error Context:" ${JSON.stringify(errorContext)}`, 'color: #1e90ffda; font-weight: bold;');
-  console.log(`%c "AI Log - Error Type:" ${errorType}`, 'color: #ff4500da; font-weight: bold;');
+  console.log('AI Log - Extracted Error:', error);
+  console.log('AI Log - Classified Error Type:', classifiedType);
+  console.log('AI Log - Error Context:', JSON.stringify(errorContext));
+  console.log('AI Log - Error Type:', errorType);
 
   return { error, errorType, classifiedType, errorContext };
 }
@@ -1148,7 +1151,7 @@ function sanitizeForPrompt(input, maxLength = 5000) {
     sanitized += `\n[... ${input.length - maxLength} characters truncated for token limit]`;
   }
   
-  console.log(`%c "AI Log - Sanitized Prompt:" ${sanitized}`, 'color: #ff8c00da; font-weight: bold;');
+  console.log('AI Log - Sanitized Prompt:', sanitized);
   return sanitized;
 }
 
@@ -1182,7 +1185,7 @@ function sanitizeErrorMessage(error, maxLength = 1000) {
   // Remove port numbers that might reveal infrastructure
   sanitized = sanitized.replace(/localhost:\d{4,5}/g, 'localhost:[PORT]');
   
-  console.log(`%c "AI Log - Sanitized Error Message:" ${sanitized}`, 'color: #ff8c00da; font-weight: bold;');
+  console.log('AI Log - Sanitized Error Message:', sanitized);
   return sanitized;
 }
 
@@ -1360,7 +1363,7 @@ function generateSelectorGuidance(testCode) {
   guidance += `4. **Last resort**: Use data-testid attributes if available\n`;
   guidance += `5. **Avoid**: Class-based selectors (.Mui*) that break on version changes\n`;
 
-  console.log(`%c "AI Log - Generated Selector Guidance:" ${guidance}`, 'color: #ff8c00da; font-weight: bold;');
+  console.log('AI Log - Generated Selector Guidance:', guidance);
   return guidance;
 }
 
@@ -1505,7 +1508,7 @@ function generateDOMArchitectureGuidance(domIssues) {
     });
   }
 
-  console.log(`%c "AI Log - Generated DOM Architecture Guidance:" ${guidance}`, 'color: #ff8c00da; font-weight: bold;');
+  console.log('AI Log - Generated DOM Architecture Guidance:', guidance);
   return guidance;
 }
 
@@ -1818,13 +1821,14 @@ function extractCSSClassesFromSourceCode(testCode, testFilePath) {
     const componentRefs = [];
     
     // Find custom element references (e.g., locator('seat-grid') or locator("seat-grid"))
-    // Support both escaped (\') and unescaped (') quotes
-    const customElementMatches = testCode.match(/locator\(\\?['"]([a-z-]+)\\?['"]\)/g) || [];
+    const customElementMatches = testCode.match(/locator\(['"]([a-z-]+)['"]\)/g) || [];
     if (HEALER_VERBOSE) console.log(`   Regex found ${customElementMatches.length} potential matches: ${customElementMatches.slice(0, 3).join(', ')}`);
     
     customElementMatches.forEach(match => {
-      const name = match.match(/\\?['"]([a-z-]+)\\?['"]/)[1];
-      componentRefs.push(name);
+      const nameMatch = match.match(/['"]([a-z-]+)['"]/);
+      if (nameMatch && nameMatch[1]) {
+        componentRefs.push(nameMatch[1]);
+      }
     });
     if (HEALER_VERBOSE) console.log(`   Found: ${componentRefs.length} component(s): ${componentRefs.join(', ')}`);
     
@@ -2545,7 +2549,7 @@ function generateClassChangeGuidance(classChanges) {
   guidance += `- Class changed: \`.available.clickable\` → \`.available.click\` (replace \`clickable\` with \`click\`)\n`;
 
   if (HEALER_VERBOSE) {
-    console.log(`%c "AI Log - Generated Class Change Guidance:" ${guidance}`, 'color: #ff8c00da; font-weight: bold;');
+    console.log('AI Log - Generated Class Change Guidance:', guidance);
   }
   return guidance;
 }
@@ -2711,28 +2715,34 @@ function extractChangeDetails(geminiResponse, testInfo) {
   };
   
   // URL Change
-  const urlPattern = /(?:OLD|current|Old|expect[^\n]*?:\s*"(.*?)"[\s\n]*(?:NEW|new|assert|expect[^\n]*?:\s*"(.*?)")?|UPDATE.*?toHaveURL|navigate to:\s*"(.*?)")/i;
-  const urlMatch = geminiResponse.match(urlPattern);
-  if (urlMatch) {
+  const normalizedResponse = geminiResponse.replace(/\r\n/g, '\n');
+  const oldUrlMatch = normalizedResponse.match(/Old\s+URL?:\s*["']?([^"'\n]+?)["']?(?=\s|$|,|;)/i);
+  const newUrlMatch = normalizedResponse.match(/New\s+URL?:\s*["']?([^"'\n]+?)["']?(?=\s|$|,|;)/i);
+  const expectedUrlMatch = normalizedResponse.match(/Expected\s+URL(?:\s*is|\s*to be|\s*:)\s*["']?([^"'\n]+?)["']?(?=\s|$|,|;)/i);
+  const currentUrlMatch = normalizedResponse.match(/(?:Current|Actual)\s+URL(?:\s*is|\s*:)\s*["']?([^"'\n]+?)["']?(?=\s|$|,|;)/i);
+  const toHaveUrlMatch = normalizedResponse.match(/toHaveURL\(\s*["']([^"']+)["']\s*\)/i);
+  const navigateUrlMatch = normalizedResponse.match(/navigate(?:d)?\s+to\s*["']([^"']+)["']/i);
+
+  if (oldUrlMatch || newUrlMatch || expectedUrlMatch || currentUrlMatch || toHaveUrlMatch || navigateUrlMatch) {
     changeDetails.changeType = 'url';
-    changeDetails.oldValue = urlMatch[1];
-    changeDetails.newValue = urlMatch[2] || urlMatch[3];
+    changeDetails.oldValue = oldUrlMatch?.[1] || currentUrlMatch?.[1] || null;
+    changeDetails.newValue = newUrlMatch?.[1] || expectedUrlMatch?.[1] || toHaveUrlMatch?.[1] || navigateUrlMatch?.[1] || null;
   }
   
   // Selector Change
-  const selectorPattern = /Replace.*selector[\s\S]{0,200}?(?:with|→|:|to)\s*(?:\`|'|"|getBy|locator)([^\`'"\n]+)/i;
+  const selectorPattern = /(?:Replace|Update|Use)\s+.*selector[\s\S]{0,200}?(?:with|→|:|to)\s*(?:\`|'|"|getBy|locator)([^\`'"\n]+)/i;
   const selectorMatch = geminiResponse.match(selectorPattern);
   if (selectorMatch) {
     changeDetails.changeType = 'selector';
-    changeDetails.replacement = selectorMatch[1];
+    changeDetails.replacement = selectorMatch[1].trim();
   }
   
   // Text Change
-  const textPattern = /text[\s\n]*(?:from|change|update|to)[\s\n]*['"](.*?)['"]/i;
+  const textPattern = /(?:text|content)[\s\n]*(?:from|change|update|to)[\s\n]*['"](.*?)['"]/i;
   const textMatch = geminiResponse.match(textPattern);
   if (textMatch) {
     changeDetails.changeType = 'text';
-    changeDetails.newValue = textMatch[1];
+    changeDetails.newValue = textMatch[1].trim();
   }
   
   return changeDetails;
@@ -3021,134 +3031,66 @@ function sanitizeForLogging(data) {
 }
 
 /**
- * Generate comprehensive analysis prompt for Gemini with security sanitization
+ * Add a value to an array only once.
  */
-function generateAnalysisPrompt(testInfo, testCode) {
-  // Security: Validate and sanitize all inputs
-  if (detectPromptInjection(testCode)) {
-    console.warn('⚠️  Warning: Potential prompt injection detected in test code. Proceeding with caution.');
+function addUnique(array, value) {
+  if (!value) return;
+  const normalized = value.toString().trim();
+  if (normalized && !array.includes(normalized)) {
+    array.push(normalized);
   }
+}
 
-  // NEW: Attempt to extract UI elements from source code
-  let uiElementsFromSource = null;
-  const componentPath = detectComponentFromTest(testInfo.file || 'test', testCode);
-  if (HEALER_SOURCE_CODE_ANALYSIS && componentPath) {
-    if (HEALER_VERBOSE) {
-      console.log(`🔍 Analyzing source code for UI elements: ${componentPath}`);
-    }
-    uiElementsFromSource = extractUIElementsFromSourceCode(componentPath);
-  }
-  
-  // Extract trace elements from Playwright trace file
-  let traceElements = { buttons: [], inputs: [], dialogs: [], htmlSnapshots: [] };
-  const tracePath = findTraceFileForTest(testInfo.file || 'test');
-  if (tracePath) {
-    console.log('🔍 Analyzing Playwright trace for element information...');
-    traceElements = extractElementsFromTrace(tracePath);
-    console.log(`📋 Trace analysis results: ${traceElements.buttons.length} buttons, ${traceElements.inputs.length} inputs, ${traceElements.dialogs.length} dialogs extracted.`);
-  }
-  
-  // Validate test code size
-  const codeSizeCheck = validateTestCodeSize(testCode, 50000);
-  if (!codeSizeCheck.valid && codeSizeCheck.truncated) {
-    console.warn(`⚠️  Warning: ${codeSizeCheck.error}`);
-    testCode = codeSizeCheck.truncated;
-  }
-  
-  // Sanitize inputs for safe LLM processing
-  const sanitizedErrorType = sanitizeForPrompt(testInfo.errorType, 100);
-  const sanitizedError = sanitizeErrorMessage(testInfo.error, 1500);
-  const sanitizedTestCode = sanitizeForPrompt(testCode, 40000);
-  
-  // NEW: Detect frontend changes upfront
-  const frontendChanges = detectFrontendChanges(testInfo, sanitizedTestCode);
-  const fixSuggestion = suggestTestFix(sanitizedTestCode, frontendChanges, testInfo);
+/**
+ * Extract labels and text patterns the test code is looking for.
+ */
+function extractTestLabelsFromCode(testCode) {
+  const labels = new Set();
+  const patterns = [
+    UI_ELEMENT_PATTERNS.testLookupLabels,
+    UI_ELEMENT_PATTERNS.testLookupLabelsRegex,
+    UI_ELEMENT_PATTERNS.testLookupTextRegex
+  ];
 
-  // Generate intelligent selector guidance based on test intent
-  const selectorGuidance = generateSelectorGuidance(testCode);
-  
-  // Generate button text guidance from trace analysis
-  const buttonTextGuidance = generateButtonTextGuidance(traceElements, testCode);
-  
-  // Detect DOM architecture issues
-  const domIssues = detectDOMArchitectureIssues(sanitizedTestCode, sanitizedError);
-  const domArchitectureGuidance = generateDOMArchitectureGuidance(domIssues);
-  const isDOMError = isDOMArchitectureError(sanitizedError, sanitizedTestCode);
-  
-  // NEW: Detect CSS class changes in rendered elements
-  // Use ORIGINAL testCode for selector extraction (not sanitized, since regex needs real quotes)
-  const classChanges = detectClassChanges(testCode, traceElements, testInfo);
-  
-  // NEW: FALLBACK - Extract CSS classes from source code if trace didn't find them
-  // (Important for Shadow DOM components that aren't captured in trace snapshots)
-  let sourceCodeClasses = { cssClasses: [], sourceFile: null };
-  if (!classChanges.hasClassChanges || (traceElements && traceElements.cssClasses.length === 0)) {
-    if (HEALER_VERBOSE) console.log(`\n📊 Trace returned ${traceElements?.cssClasses?.length || 0} classes. Attempting source code fallback...`);
-    sourceCodeClasses = extractCSSClassesFromSourceCode(testCode, testInfo.file);
-    if (HEALER_VERBOSE) console.log(`📝 Source code extraction returned ${sourceCodeClasses.cssClasses.length} class combinations`);
-    
-    // If source code has CSS classes, use them to enhance class change detection
-    if (sourceCodeClasses.cssClasses.length > 0) {
-      if (HEALER_VERBOSE) console.log(`🔄 Re-analyzing with source code classes...`);
-      // Re-analyze with source code classes (use original testCode for regex matching)
-      const enhancedTrace = {
-        ...traceElements,
-        cssClasses: sourceCodeClasses.cssClasses
-      };
-      const enhancedClassChanges = detectClassChanges(testCode, enhancedTrace, testInfo);
-      if (HEALER_VERBOSE) console.log(`✨ Enhanced detection found ${enhancedClassChanges.changedSelectors.length} selector issues`);
-      
-      // Use enhanced detection if it found changes
-      if (enhancedClassChanges.hasClassChanges && !classChanges.hasClassChanges) {
-        Object.assign(classChanges, enhancedClassChanges);
-        if (HEALER_VERBOSE) {
-          console.log(`✅ CSS class changes detected via source code analysis:`);
-          console.log(`   - Base classes: ${sourceCodeClasses.baseClasses.join(', ')}`);
-          console.log(`   - Affected selectors: ${enhancedClassChanges.changedSelectors.map(s => s.current).join(', ')}`);
-        }
+  patterns.forEach(pattern => {
+    for (const match of testCode.matchAll(pattern)) {
+      if (match[1]) {
+        labels.add(match[1].trim());
       }
-    } else if (HEALER_VERBOSE) {
-      console.log(`⚠️  Source code extraction found no CSS classes`);
     }
+  });
+
+  return Array.from(labels);
+}
+
+/**
+ * Build a source-code label comparison block for the prompt.
+ */
+function buildLabelComparisonTable(uiElementsFromSource, testLabelsLookingFor) {
+  if (!uiElementsFromSource || !uiElementsFromSource.labels?.length || testLabelsLookingFor.length === 0) {
+    return '';
   }
 
-  // NEW: Add UI element context to prompt if available
-  let uiElementContext = '';
-  if (uiElementsFromSource && uiElementsFromSource.totalExtracted > 0) {
-    // Extract labels the test is LOOKING FOR (both string literals and regex patterns)
-    const testLookupMatches = sanitizedTestCode.matchAll(UI_ELEMENT_PATTERNS.testLookupLabels);
-    const testLookupRegexMatches = sanitizedTestCode.matchAll(UI_ELEMENT_PATTERNS.testLookupLabelsRegex);
-    const testTextRegexMatches = sanitizedTestCode.matchAll(UI_ELEMENT_PATTERNS.testLookupTextRegex);
-    const testLabelsLookingFor = new Set();
-    
-    // Collect string literal matches
-    for (const match of testLookupMatches) {
-      if (match[1]) testLabelsLookingFor.add(match[1]);
-    }
-    
-    // Collect regex pattern matches (from /pattern/i style)
-    for (const match of testLookupRegexMatches) {
-      if (match[1]) testLabelsLookingFor.add(match[1]);
-    }
-    
-    // Collect getByText regex patterns too
-    for (const match of testTextRegexMatches) {
-      if (match[1]) testLabelsLookingFor.add(match[1]);
-    }
+  let table = '**Label Mapping (Test Looking For vs Source Code):**\n```\n';
+  testLabelsLookingFor.forEach(testLabel => {
+    const found = uiElementsFromSource.labels.find(l => l.toLowerCase() === testLabel.toLowerCase());
+    const status = found ? `✓ Found as "${found}"` : '✗ NOT FOUND - needs update';
+    table += `${testLabel.padEnd(20)} → ${status}\n`;
+  });
+  table += '```\n';
 
-    // Build comparison table
-    let labelComparisonTable = '';
-    if (testLabelsLookingFor.size > 0) {
-      labelComparisonTable = '**Label Mapping (Test Looking For vs Source Code):**\n```\n';
-      for (const testLabel of testLabelsLookingFor) {
-        const found = uiElementsFromSource.labels.find(l => l.toLowerCase() === testLabel.toLowerCase());
-        const status = found ? `✓ Found as "${found}"` : '✗ NOT FOUND - needs update';
-        labelComparisonTable += `${testLabel.padEnd(20)} → ${status}\n`;
-      }
-      labelComparisonTable += '```\n';
-    }
+  return table;
+}
 
-    uiElementContext = `
+/**
+ * Build the UI element context block for the Gemini prompt.
+ */
+function buildUIElementContext(componentPath, uiElementsFromSource, testLabelsLookingFor) {
+  if (!uiElementsFromSource || uiElementsFromSource.totalExtracted === 0) {
+    return '';
+  }
+
+  return `
 ### 🎯 CRITICAL: UI ELEMENT ANALYSIS FROM SOURCE CODE
 
 **Component:** ${componentPath}
@@ -3156,7 +3098,7 @@ function generateAnalysisPrompt(testInfo, testCode) {
 **Actual Labels in Source Code:**
 ${uiElementsFromSource.labels.length > 0 ? uiElementsFromSource.labels.map(l => `- "${l}"`).join('\n') : 'None'}
 
-${labelComparisonTable}
+${buildLabelComparisonTable(uiElementsFromSource, testLabelsLookingFor)}
 
 **Action Required:** 
 If the test uses getByLabel('X') or getByLabel(/X/i) but 'X' is NOT in the list above, the test MUST be updated to use an existing label from the source code.
@@ -3169,16 +3111,17 @@ Examples of corrections:
 
 **RULE**: Always use labels that exist in the source code list above. Never create new label names.
 `;
- console.log(`%c "AI Log - UI Element Context:" ${uiElementContext}`, 'color: #ff8c00da; font-weight: bold;');
+}
+
+/**
+ * Build the behavioral guidance block for the Gemini prompt.
+ */
+function buildBehavioralGuidance(frontendChanges, fixSuggestion) {
+  if (!frontendChanges || (!frontendChanges.urlChange && frontendChanges.selectorChanges.length === 0 && frontendChanges.textChanges.length === 0 && frontendChanges.labelChanges.length === 0)) {
+    return '';
   }
 
-  // NEW: Build behavioral change guidance
-  let behavioralGuidance = '';
-  if (frontendChanges.urlChange || frontendChanges.selectorChanges.length > 0 || 
-      frontendChanges.textChanges.length > 0 || frontendChanges.labelChanges.length > 0) {
-    
-    behavioralGuidance = `
-
+  return `
 ## 🔄 FRONTEND CHANGE DETECTED - INTELLIGENT ANALYSIS
 
 ### Change Detection Results:
@@ -3188,20 +3131,16 @@ ${frontendChanges.urlChange ? `
 - Actual Path: ${frontendChanges.urlChange.receivedPath}
 - Is Targeted Redirect: ${frontendChanges.urlChange.isTargeted}
 - Likely Frontend Bug: ${frontendChanges.urlChange.isFrontendBug}
-` : ''}
-${frontendChanges.selectorChanges.length > 0 ? `
+` : ''}${frontendChanges.selectorChanges.length > 0 ? `
 **Selector Changes (${frontendChanges.selectorChanges.length} detected)**
 ${frontendChanges.selectorChanges.map(s => `- ${s.type}: ${s.likely_cause}`).join('\n')}
-` : ''}
-${frontendChanges.textChanges.length > 0 ? `
+` : ''}${frontendChanges.textChanges.length > 0 ? `
 **Text/Content Changes (${frontendChanges.textChanges.length} detected)**
 ${frontendChanges.textChanges.map(s => `- ${s.type}: ${s.likely_cause}`).join('\n')}
-` : ''}
-${frontendChanges.labelChanges.length > 0 ? `
+` : ''}${frontendChanges.labelChanges.length > 0 ? `
 **Label/Placeholder Changes (${frontendChanges.labelChanges.length} detected)**
 ${frontendChanges.labelChanges.map(s => `- ${s.type}: ${s.likely_cause}`).join('\n')}
 ` : ''}
-
 ### Suggested Fix Strategy: ${fixSuggestion.strategy.toUpperCase()}
 **Confidence: ${fixSuggestion.confidence}**
 **Can Auto-Fix: ${fixSuggestion.canAutoFix}**
@@ -3257,19 +3196,113 @@ ${fixSuggestion.actions.map(a => `- ${a}`).join('\n')}
 5. **Maintain test intent** - don't silently accept broken behavior
 6. **If unsure**: Include both analysis and suggest manual review
 `;
-console.log(`%c "AI Log - Behavioral Guidance:" ${behavioralGuidance}`, 'color: #1e80ffe5; font-weight: bold;');
+}
+
+function buildPromptSections(parts) {
+  return parts.filter(Boolean).join('\n\n');
+}
+
+function getTestNameFromCode(testCode) {
+  const match = testCode.match(/test\s*\(\s*['\"]([^'\"]+)['\"]/);
+  return match ? match[1] : 'Unknown';
+}
+
+/**
+ * Generate comprehensive analysis prompt for Gemini with security sanitization
+ */
+function generateAnalysisPrompt(testInfo, testCode) {
+  // Security: Validate and sanitize all inputs
+  if (detectPromptInjection(testCode)) {
+    console.warn('⚠️  Warning: Potential prompt injection detected in test code. Proceeding with caution.');
+  }
+
+  let uiElementsFromSource = null;
+  const componentPath = detectComponentFromTest(testInfo.file || 'test', testCode);
+  if (HEALER_SOURCE_CODE_ANALYSIS && componentPath) {
+    if (HEALER_VERBOSE) {
+      console.log(`🔍 Analyzing source code for UI elements: ${componentPath}`);
+    }
+    uiElementsFromSource = extractUIElementsFromSourceCode(componentPath);
+  }
+
+  let traceElements = { buttons: [], inputs: [], dialogs: [], htmlSnapshots: [], cssClasses: [] };
+  const tracePath = findTraceFileForTest(testInfo.file || 'test');
+  if (tracePath) {
+    console.log('🔍 Analyzing Playwright trace for element information...');
+    traceElements = extractElementsFromTrace(tracePath);
+    console.log(`📋 Trace analysis results: ${traceElements.buttons.length} buttons, ${traceElements.inputs.length} inputs, ${traceElements.dialogs.length} dialogs extracted.`);
+  }
+
+  const codeSizeCheck = validateTestCodeSize(testCode, 50000);
+  if (!codeSizeCheck.valid && codeSizeCheck.truncated) {
+    console.warn(`⚠️  Warning: ${codeSizeCheck.error}`);
+    testCode = codeSizeCheck.truncated;
+  }
+
+  const sanitizedErrorType = sanitizeForPrompt(testInfo.errorType, 100);
+  const sanitizedError = sanitizeErrorMessage(testInfo.error, 1500);
+  const sanitizedTestCode = sanitizeForPrompt(testCode, 40000);
+
+  const frontendChanges = detectFrontendChanges(testInfo, sanitizedTestCode);
+  const fixSuggestion = suggestTestFix(sanitizedTestCode, frontendChanges, testInfo);
+
+  const selectorGuidance = generateSelectorGuidance(testCode);
+  const buttonTextGuidance = generateButtonTextGuidance(traceElements, testCode);
+  const domIssues = detectDOMArchitectureIssues(sanitizedTestCode, sanitizedError);
+  const domArchitectureGuidance = generateDOMArchitectureGuidance(domIssues);
+  const isDOMError = isDOMArchitectureError(sanitizedError, sanitizedTestCode);
+  const classChanges = detectClassChanges(testCode, traceElements, testInfo);
+
+  let sourceCodeClasses = { cssClasses: [], sourceFile: null, baseClasses: [] };
+  if (!classChanges.hasClassChanges || traceElements.cssClasses.length === 0) {
+    if (HEALER_VERBOSE) {
+      console.log(`\n📊 Trace returned ${traceElements.cssClasses.length} classes. Attempting source code fallback...`);
+    }
+    sourceCodeClasses = extractCSSClassesFromSourceCode(testCode, testInfo.file);
+    if (HEALER_VERBOSE) {
+      console.log(`📝 Source code extraction returned ${sourceCodeClasses.cssClasses.length} class combinations`);
+    }
+
+    if (sourceCodeClasses.cssClasses.length > 0) {
+      if (HEALER_VERBOSE) console.log(`🔄 Re-analyzing with source code classes...`);
+      const enhancedTrace = { ...traceElements, cssClasses: sourceCodeClasses.cssClasses };
+      const enhancedClassChanges = detectClassChanges(testCode, enhancedTrace, testInfo);
+      if (HEALER_VERBOSE) console.log(`✨ Enhanced detection found ${enhancedClassChanges.changedSelectors.length} selector issues`);
+
+      if (enhancedClassChanges.hasClassChanges && !classChanges.hasClassChanges) {
+        Object.assign(classChanges, enhancedClassChanges);
+        if (HEALER_VERBOSE) {
+          console.log(`✅ CSS class changes detected via source code analysis:`);
+          console.log(`   - Base classes: ${sourceCodeClasses.baseClasses.join(', ')}`);
+          console.log(`   - Affected selectors: ${enhancedClassChanges.changedSelectors.map(s => s.current).join(', ')}`);
+        }
+      }
+    } else if (HEALER_VERBOSE) {
+      console.log(`⚠️  Source code extraction found no CSS classes`);
+    }
+  }
+
+  const uiElementContext = buildUIElementContext(componentPath, uiElementsFromSource, Array.from(sanitizedTestCode.matchAll(UI_ELEMENT_PATTERNS.testLookupLabels)).map(m => m[1]).filter(Boolean));
+  if (HEALER_VERBOSE && uiElementContext) {
+    console.log('AI Log - UI Element Context:', uiElementContext);
+  }
+
+  const behavioralGuidance = buildBehavioralGuidance(frontendChanges, fixSuggestion);
+  if (HEALER_VERBOSE && behavioralGuidance) {
+    console.log('AI Log - Behavioral Guidance:', behavioralGuidance);
   }
 
   // NEW: Generate class change guidance
   const classChangeGuidance = generateClassChangeGuidance(classChanges);
 
-  return `You are an expert Playwright test automation engineer specializing in:
+  const promptSections = [
+    `You are an expert Playwright test automation engineer specializing in:
 1. **Fixing broken tests due to frontend changes** (selectors, URLs, text, design)
 2. **Detecting legitimate vs broken behavior changes**
 3. **Maintaining test intent while supporting frontend evolution**
-4. **DOM architecture issues** (Shadow DOM, iframes, Web Components)
+4. **DOM architecture issues** (Shadow DOM, iframes, Web Components)`,
 
-## ANALYSIS REQUIREMENTS:
+    `## ANALYSIS REQUIREMENTS:
 
 🔴 **PRIORITY 1: IF UI ELEMENTS CONTEXT PROVIDED BELOW:**
 - Use the "CURRENT UI ELEMENTS IN SOURCE CODE" section
@@ -3301,9 +3334,16 @@ console.log(`%c "AI Log - Behavioral Guidance:" ${behavioralGuidance}`, 'color: 
 
 4. **Recommended Fixes**: Provide clear, prioritized steps
 
-5. **Fixed Code**: Provide COMPLETE corrected test code (if UPDATE_TEST or UPDATE_SELECTOR or UPDATE_TEXT or ARCHITECTURAL_FIX)
+5. **Fixed Code**: Provide COMPLETE corrected test code (if UPDATE_TEST or UPDATE_SELECTOR or UPDATE_TEXT or ARCHITECTURAL_FIX)`,
 
-Error Type: ${sanitizedErrorType}
+    uiElementContext,
+    selectorGuidance,
+    buttonTextGuidance,
+    classChangeGuidance,
+    behavioralGuidance,
+    domArchitectureGuidance,
+
+    `Error Type: ${sanitizedErrorType}
 Error Message:
 \`\`\`
 ${sanitizedError}
@@ -3312,46 +3352,9 @@ ${sanitizedError}
 Current Test Code:
 \`\`\`typescript
 ${sanitizedTestCode}
-\`\`\`
+\`\`\``,
 
-${uiElementContext}
-
-${selectorGuidance}
-
-${buttonTextGuidance}
-
-${classChangeGuidance}
-
-${behavioralGuidance}
-
-${domArchitectureGuidance}
-
-1. **Root Cause Analysis**: Explain why the test is failing (element not found, changed selector, etc.)
-2. **Error Classification**: Identify the type of error (timeout, assertion, selector_not_found, etc.)
-3. **Element Intent Detection**: What element is the test trying to interact with and what is its purpose?
-4. **Selector Analysis**: 
-   - Identify brittle selectors (class-based, nth positioning)
-   - Suggest resilient alternatives that survive frontend updates
-5. **Recommended Fixes**: Provide clear, step-by-step fixes prioritizing selector resilience
-6. **Fixed Code**: Provide the COMPLETE corrected test code
-
-CRITICAL: You MUST provide the complete fixed test code inside a TypeScript code block.
-The code block MUST include all imports, the complete test function, and closing braces.
-Do NOT truncate the code block. Provide the full, working test code.
-
-Error Type: ${sanitizedErrorType}
-Error Message:
-\`\`\`
-${sanitizedError}
-\`\`\`
-
-Current Test Code:
-\`\`\`typescript
-${sanitizedTestCode}
-\`\`\`
-${selectorGuidance}
-
-Analysis Focus Areas:
+    `Analysis Focus Areas:
 - **Selector Resilience** (PRIMARY FOCUS):
   * Identify what element should be selected (button, link, input, div, etc.)
   * Detect if current selector uses Material-UI class names (.Mui*)
@@ -3361,12 +3364,12 @@ Analysis Focus Areas:
   * Use data-testid for elements that need unique identification
 
 - **Material-UI Component Selector Resilience - Two-Way Fix Strategy**:
-  
-  **WAY 1: Brittle Selectors **
+
+  **WAY 1: Brittle Selectors**
   * .MuiBox-root, .MuiPaper-root, .MuiCard-root, .MuiButton-root
   * Combining multiple Mui classes
   * nth() positioning
-  
+
   **WAY 2: Resilient Selectors (PREFER - Survive Frontend Updates)**
   * getByRole() - MOST RESILIENT
   * getByText()
@@ -3374,27 +3377,25 @@ Analysis Focus Areas:
   * getByTestId()
   * getByPlaceholder()
   * Filter by text/role
-  
+
   **INSTRUCTION**: When fixing test selectors, identify any WAY 1 patterns and replace them with appropriate WAY 2 selectors to ensure test resilience across Material-UI version upgrades.
 
 - Timing and async operations (waitForNavigation, waitForLoadState, waitForURL, etc.)
 - Test data assumptions and brittleness (hardcoded values, assumptions about DOM structure)
 - Accessibility-first selectors (getByRole, getByLabel, getByPlaceholder)
 - Strict mode violations (locators matching multiple elements when expecting one)
-- Frontend version upgrade compatibility: Use selectors that survive Material-UI v5→v6→v7+ updates
-${buttonTextGuidance}
-${domArchitectureGuidance}
+- Frontend version upgrade compatibility: Use selectors that survive Material-UI v5→v6→v7+ updates`,
 
-### Selector Resilience Strategy:
+    `### Selector Resilience Strategy:
 - **Material-UI Components**: Avoid .Mui* classes → Use getByRole('button', { name: /text/i })
 - **Buttons**: getByRole('button', { name: /text/i }) > getByText(/text/i) > getByTestId
 - **Inputs**: getByLabel(/label/i) > getByPlaceholder(/placeholder/i) > getByTestId
 - **Links**: getByRole('link', { name: /text/i }) > getByText
-- **Custom Elements**: Nested locators for Shadow DOM: page.locator('parent').locator('.child')
+- **Custom Elements**: Nested locators for Shadow DOM: page.locator('parent').locator('.child')`,
 
-### TEST INTENT:
+    `### TEST INTENT:
 Based on test file and name: \`${testInfo.file}\`
-The test should verify: \`${sanitizedTestCode.match(/test\s*\(\s*['"](.*?)['"]/) ? sanitizedTestCode.match(/test\s*\(\s*['"](.*?)['"]/) [1] : 'Unknown'}\`
+The test should verify: \`${getTestNameFromCode(testCode)}\`
 
 CRITICAL INSTRUCTIONS:
 1. Start response with: \`DECISION: [ONE OF: FRONTEND_BUG, UPDATE_TEST, UPDATE_SELECTOR, UPDATE_TEXT, ARCHITECTURAL_FIX, MANUAL_REVIEW]\`
@@ -3402,8 +3403,10 @@ CRITICAL INSTRUCTIONS:
 3. DO NOT truncate code - provide full working test
 4. Explain decision reasoning
 5. For FRONTEND_BUG: describe what developers should fix
-${isDOMError ? '\n6. DOM ARCHITECTURE ISSUE DETECTED: Apply DOM architecture fixes FIRST' : ''}
-`;
+${isDOMError ? '\n6. DOM ARCHITECTURE ISSUE DETECTED: Apply DOM architecture fixes FIRST' : ''}`
+  ];
+
+  return buildPromptSections(promptSections);
 }
 
 async function analyzeWithGemini(testInfo, testCode, classChanges = null, retryCount = 0) {
@@ -3919,9 +3922,9 @@ function displayFixedCode(fixedCode, testTitle) {
  * Display enhanced healing summary with decision breakdown
  */
 function displayEnhancedSummary(healingResults) {
-  console.log(`\n${'═'.repeat(70)}`);
-  console.log(`📊 HEALING SESSION COMPLETE`);
-  console.log(`═'.repeat(70)}`);
+  console.log('\n' + '═'.repeat(70));
+  console.log('📊 HEALING SESSION COMPLETE');
+  console.log('═'.repeat(70));
   
   const stats = getSessionStatistics();
   const results = healingResults.tests;

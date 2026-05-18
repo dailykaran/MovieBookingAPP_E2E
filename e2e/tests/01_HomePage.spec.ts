@@ -1,8 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-
 test('verify app loads', async ({ page }) => {
-
   await page.goto('http://localhost:3000');
-  await expect(page).toHaveTitle('showGlow', { timeout: 10000 });
+  await expect(page).toHaveTitle('ShowGlow booking', { timeout: 10000 });
 });

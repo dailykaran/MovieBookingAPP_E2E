@@ -10,12 +10,14 @@ test('Verify label names on user details page', async ({ page }) => {
   const seatGridComponent = page.locator('seat-grid');
   await seatGridComponent.waitFor({ state: 'attached' });
 
-  // Fixed Shadow DOM selector usage using nested locators
+  // Shadow DOM interaction for seats is already correctly handled by nested locators
   const seats = seatGridComponent.locator('.seat-grid-container .seat-grid .seat.available.clickable');
 
-  await seats.first().waitFor({ state: 'visible' }); 
+  await seats.first().waitFor({ state: 'visible' }); // Ensures seats are rendered
   const seatCount = await seats.count();
   
+  
+  console.log(`Available seats found: ${seatCount}`); 
   if (seatCount > 0) {
     await seats.first().click();
   } else {
@@ -32,26 +34,31 @@ test('Verify label names on user details page', async ({ page }) => {
 
   await page.waitForLoadState('domcontentloaded'); 
   
-  // Resilient form filling
-  const fullNameInput = page.getByLabel(/First Name|Full Name/i);
+  // FIX: The previous getByLabel(/name/i) caused a strict mode violation.
+  // Using getByRole with the specific accessible name 'Full Name' for the first input.
+  const fullNameInput = page.getByRole('textbox', { name: 'Full Name' });
   await expect(fullNameInput).toBeVisible(); 
   await fullNameInput.fill('John'); 
   
-  const lastNameInput = page.getByLabel(/Last Name|Surname/i);
-  await expect(lastNameInput).toBeVisible(); 
+  // Using getByRole with the specific accessible name 'Last Name' for the second input.
+  const lastNameInput = page.getByRole('textbox', { name: 'Last Name' });
+  await expect(lastNameInput).toBeVisible(); // Ensure visibility before filling
   await lastNameInput.fill('Doe'); 
   
-  const emailInput = page.getByLabel(/Email/i).or(page.getByPlaceholder(/Email/i));
-  await emailInput.fill('test@example.com'); 
+  // Update other input fields to use getByRole for consistency and resilience
+  await page.getByRole('textbox', { name: /email/i }).fill('test@example.com'); 
 
-  const phoneNumberInput = page.getByLabel(/(phone|mobile|contact) number/i);
-  await expect(phoneNumberInput).toBeVisible();
+  // Store the phone number input locator for reuse
+  // FIX: Updated regex for 'Phone Number' to be more resilient to label changes (e.g., "Mobile Number")
+  const phoneNumberInput = page.getByRole('textbox', { name: /(phone|mobile|contact) number/i });
+  await expect(phoneNumberInput).toBeVisible(); // Ensure visibility before interacting
+  //await phoneNumberInput.click(); // Ensure the field is focused before filling
+  // FIX: Replaced brittle getByPlaceholder with the resilient getByRole locator
+  await phoneNumberInput.click(); // Ensure the field is focused before filling
   await phoneNumberInput.fill('9898976765');
- 
-  // Fix: Use getByLabel for Age, as spinbutton role might not be properly exposed
-  const ageInput = page.getByLabel(/Age/i).or(page.getByPlaceholder(/Age/i));
-  await expect(ageInput).toBeVisible();
-  await ageInput.fill('25'); 
+  //await page.getByPlaceholder('+91 (123) 456-7890').fill('9898976765'); 
+  
+  await page.getByRole('textbox', { name: /age/i }).fill('25'); 
 
-  await page.getByRole('button', { name: /Continue to Payment/i }).click();
+  await page.getByRole('button', { name: 'Continue to Payment' }).click();
 });

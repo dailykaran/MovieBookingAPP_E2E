@@ -7,28 +7,25 @@ test.describe('Back button on the movie page', () => {
     const baseUrl = `http://localhost:${PORT}`;
     
     await page.goto(baseUrl);
-    
-    // Ensure initial load
     await page.waitForLoadState('networkidle');
 
-    // Select the button and navigate to movie page
+    // Select the first "Book Now" button using role-based selector
     const bookNowButton = page.getByRole('button', { name: /book now/i }).first();
     await expect(bookNowButton).toBeVisible();
     await bookNowButton.click();
 
-    // Use a case-insensitive regex to match "Back" button text
-    // This is more resilient to CSS text-transform changes
-    const backButton = page.getByRole('button', { name: /back/i }); 
+    // Fix: Remove exact: true and use case-insensitive regex for resilience
+    // Also, if the element might be a link, getByRole(..., { name: /.../i }) covers both button and link roles
+    const backButton = page.getByRole('button', { name: /back to movies/i });
     
     await expect(backButton).toBeVisible();
     
-    // Click and wait for URL to change back to home
+    // Perform navigation and verify
     await Promise.all([
       page.waitForURL(baseUrl),
       backButton.click()
     ]);
 
-    // Final verification
     await expect(page).toHaveURL(baseUrl);
   });
 

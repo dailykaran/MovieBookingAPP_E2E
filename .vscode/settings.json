@@ -29,6 +29,10 @@
         "/^cd \"d:\\\\AI_explore\\\\APP_E2E_JSMovieBooking\\\\AI_Powered_MovieBookingAPP_E2E\\\\e2e\" ; node -c gemini-healer\\.js ; echo \"✅ Syntax check passed\"$/": {
             "approve": true,
             "matchCommandLine": true
+        },
+        "/^cd e2e; node gemini-healer\\.js --auto-fix --verbose$/": {
+            "approve": true,
+            "matchCommandLine": true
         }
     }
 }

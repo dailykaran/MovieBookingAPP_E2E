@@ -36,6 +36,19 @@ function stripAnsiCodes(text) {
     .replace(/\[\d+[A-Z]/g, '');          // Fallback for cursor codes
 }
 
+function normalizeReportedValue(rawValue) {
+  if (rawValue === null || rawValue === undefined) return null;
+  const text = `${rawValue}`.trim();
+  const prefixMatch = text.match(/^(?:Old|New|Failed|Working|Decision|Current|Actual)\s*[^:]*:\s*(.*)$/i);
+  const cleaned = prefixMatch ? prefixMatch[1].trim() : text;
+  if (!cleaned || /^(N\/A|NA|undefined|null)$/i.test(cleaned)) return null;
+  return cleaned;
+}
+
+function resolveLocatorText(eventValue, detailValue) {
+  return normalizeReportedValue(eventValue) || normalizeReportedValue(detailValue);
+}
+
 /**
  * Format code with line numbers - simplified and truncated
  */
@@ -114,21 +127,13 @@ function extractLocatorChanges(healingLogs) {
                       (event.details?.decision === 'ARCHITECTURAL_FIX' ? 'architecture' : 'selector');
     
     // Extract change details based on event type
-    let failedValue = event.failedLocator || event.details?.oldValue || 'N/A';
-    let workingValue = event.workingLocator || event.details?.newValue || 'N/A';
+    let failedValue = resolveLocatorText(event.failedLocator, event.details?.oldValue) || 'N/A';
+    let workingValue = resolveLocatorText(event.workingLocator, event.details?.newValue) || normalizeReportedValue(event.details?.replacement) || 'N/A';
     
     // Skip if both are N/A or same (no actual change)
     if ((failedValue === 'N/A' && workingValue === 'N/A') || 
         (failedValue === workingValue && changeType === 'selector')) {
       return;
-    }
-    
-    // Use details object as backup source for changes
-    if (failedValue === 'N/A' && event.details?.oldValue) {
-      failedValue = event.details.oldValue;
-    }
-    if (workingValue === 'N/A' && event.details?.newValue) {
-      workingValue = event.details.newValue;
     }
     
     const key = `${event.elementName}|${failedValue}|${workingValue}|${changeType}`;
@@ -181,12 +186,10 @@ function extractAllSelectors(healingLogs) {
     }
     
     // Extract failed and working values with fallbacks
-    const failedValue = event.failedLocator || 
-                       event.details?.oldValue || 
+    const failedValue = resolveLocatorText(event.failedLocator, event.details?.oldValue) || 
                        (event.eventType === 'dom_architecture_detected' ? 'Shadow DOM / Web Components' : 'Unknown');
     
-    const workingValue = event.workingLocator || 
-                        event.details?.newValue || 
+    const workingValue = resolveLocatorText(event.workingLocator, event.details?.newValue) || normalizeReportedValue(event.details?.replacement) || 
                         (event.eventType === 'dom_architecture_detected' ? 'Architectural fixes applied' : 'Fixed');
     
     const key = `${event.elementName}|${failedValue}|${changeType}`;
