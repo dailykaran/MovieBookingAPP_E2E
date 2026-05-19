@@ -33,6 +33,10 @@
         "/^cd e2e; node gemini-healer\\.js --auto-fix --verbose$/": {
             "approve": true,
             "matchCommandLine": true
+        },
+        "/^node -c gemini-healer\\.js$/": {
+            "approve": true,
+            "matchCommandLine": true
         }
     }
 }

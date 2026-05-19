@@ -93,6 +93,10 @@ const UI_ELEMENT_PATTERNS = {
 // Track API call rate for rate limiting
 let apiCallTimes = [];
 
+// ========== MEMORY MANAGEMENT ==========
+// FIXED: Circular buffer to prevent unbounded memory growth in healingLogs.events
+const HEALER_MAX_LOG_EVENTS = parseInt(process.env.HEALER_MAX_LOG_EVENTS || '200', 10);
+
 // ========== LOGGING SYSTEM ==========
 
 // In-memory log storage
@@ -131,6 +135,71 @@ let healingLogs = {
 };
 
 /**
+ * Initialize/reset global healing state
+ * FIXED: Ensures clean state for each healing session and prevents state bleeding
+ */
+function initializeHealingState() {
+  healingLogs = {
+    sessionId: generateSessionId(),
+    startTime: new Date().toISOString(),
+    events: [],
+    statistics: {
+      totalEvents: 0,
+      failedLocators: 0,
+      workedLocators: 0,
+      elementsHealed: 0,
+      behavioralChangesDetected: 0,
+      frontendBugsDetected: 0,
+      selectorUpdates: 0,
+      textUpdates: 0,
+      urlUpdates: 0,
+      architecturalFixes: 0,
+      decisionBreakdown: {
+        FRONTEND_BUG: 0,
+        UPDATE_TEST: 0,
+        UPDATE_SELECTOR: 0,
+        UPDATE_TEXT: 0,
+        SELECTOR_CLASS_UPDATE: 0,
+        ARCHITECTURAL_FIX: 0,
+        MANUAL_REVIEW: 0,
+        UNKNOWN: 0
+      },
+      confidenceDistribution: {
+        high: 0,
+        medium: 0,
+        low: 0
+      }
+    }
+  };
+  
+  // Reset global state variables
+  apiCallTimes = [];
+  sessionSourceCodeExtraction = 0;
+  sessionSourceCodeFiles = [];
+  
+  if (HEALER_VERBOSE) {
+    console.log('✅ Healing state initialized for new session');
+  }
+}
+
+/**
+ * Cleanup resources before process exit
+ * FIXED: Ensures all resources are properly closed before terminating
+ */
+function cleanupBeforeExit() {
+  try {
+    // Persist any pending logs
+    if (healingLogs && healingLogs.events && healingLogs.events.length > 0) {
+      persistLogs();
+    }
+  } catch (err) {
+    if (HEALER_VERBOSE) {
+      console.error(`⚠️  Error during cleanup: ${err.message}`);
+    }
+  }
+}
+
+/**
  * Generate unique session ID
  */
 function generateSessionId() {
@@ -139,6 +208,7 @@ function generateSessionId() {
 
 /**
  * Log a healing event with all relevant details
+ * FIXED: Implements circular buffer to prevent unbounded memory growth
  */
 function logHealingEvent(eventType, elementName, failedLocator, workingLocator, details = {}) {
   const logEntry = {
@@ -152,7 +222,12 @@ function logHealingEvent(eventType, elementName, failedLocator, workingLocator, 
     duration: details.duration || null
   };
 
+  // FIXED: Implement circular buffer - keep only last N events
   healingLogs.events.push(logEntry);
+  if (healingLogs.events.length > HEALER_MAX_LOG_EVENTS) {
+    healingLogs.events.shift(); // Remove oldest event
+  }
+  
   healingLogs.statistics.totalEvents++;
 
   if (eventType === 'locator_failure') {
@@ -624,26 +699,34 @@ function createBackup(filePath) {
 
 /**
  * Security: Atomic file write with temp file (cross-device compatible)
+ * FIXED: Added try-finally to guarantee cleanup of temp files
  */
 function atomicFileWrite(filePath, content) {
+  const targetDir = path.dirname(filePath);
+  const tempFile = path.join(targetDir, `healer-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.tmp`);
+  
   try {
-    const targetDir = path.dirname(filePath);
-    const tempFile = path.join(targetDir, `healer-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.tmp`);
-    
     fs.writeFileSync(tempFile, content, 'utf8');
     
     const written = fs.readFileSync(tempFile, 'utf8');
     if (written !== content) {
-      fs.unlinkSync(tempFile);
       throw new Error('Content verification failed');
     }
     
     fs.copyFileSync(tempFile, filePath);
-    fs.unlinkSync(tempFile);
     return true;
   } catch (err) {
     console.error(`❌ Atomic write error: ${err.message}`);
     return false;
+  } finally {
+    // CRITICAL: Always clean up temp file, even if copy fails
+    try {
+      if (fs.existsSync(tempFile)) {
+        fs.unlinkSync(tempFile);
+      }
+    } catch (cleanupErr) {
+      console.warn(`⚠️  Failed to clean up temp file: ${cleanupErr.message}`);
+    }
   }
 }
 
@@ -944,7 +1027,13 @@ function getFailedTests() {
 
   try {
     const resultsContent = fs.readFileSync(resultsPath, 'utf8');
-    const results = JSON.parse(resultsContent);
+    let results;
+    try {
+      results = JSON.parse(resultsContent);
+    } catch (parseErr) {
+      console.error(`❌ Failed to parse test results JSON: ${parseErr.message}`);
+      return [];
+    }
     console.log(`📊 AI Log - Test results parsed length: ${results.suites.length} suites`);
     // console.log(`📊 AI Log - Test results parsed: ${JSON.stringify(results, null, 2)}`);
 
@@ -1726,7 +1815,49 @@ function findTraceFileForTest(testName) {
 }
 
 /**
- * Extract UI elements from a Playwright trace zip
+ * Convert array-based HTML representation from Playwright trace to string format
+ * Array format: [tagName, attributes, ...children]
+ */
+function arrayHtmlToString(arrayHtml) {
+  if (!arrayHtml) return '';
+  if (typeof arrayHtml === 'string') return arrayHtml;
+  if (!Array.isArray(arrayHtml)) return '';
+  
+  const [tagName, attrs = {}, ...children] = arrayHtml;
+  if (!tagName || typeof tagName !== 'string') return '';
+  
+  // Build attributes string
+  let attrStr = '';
+  for (const [key, value] of Object.entries(attrs)) {
+    if (value !== undefined && value !== null) {
+      const escapedValue = String(value).replace(/"/g, '&quot;');
+      attrStr += ` ${key}="${escapedValue}"`;
+    }
+  }
+  
+  // Recursively convert children
+  let childrenHtml = '';
+  for (const child of children) {
+    if (typeof child === 'string') {
+      childrenHtml += child;
+    } else if (Array.isArray(child)) {
+      childrenHtml += arrayHtmlToString(child);
+    }
+  }
+  
+  // Self-closing tags
+  const selfClosing = ['img', 'input', 'br', 'hr', 'meta', 'link'];
+  if (selfClosing.includes(tagName.toLowerCase())) {
+    return `<${tagName}${attrStr}>`;
+  }
+  
+  return `<${tagName}${attrStr}>${childrenHtml}</${tagName}>`;
+}
+
+/**
+ * Extract UI elements from a Playwright trace zip (supports both old and new formats)
+ * New format (Playwright 1.40+): Uses .trace files with NDJSON format containing frame-snapshots
+ * Old format: Uses trace.json with snapshots array
  */
 function extractElementsFromTrace(tracePath) {
   try {
@@ -1750,138 +1881,305 @@ function extractElementsFromTrace(tracePath) {
       buttons: [],
       inputs: [],
       dialogs: [],
-      iframes: [],  // NEW: Track iframes with title, src, name
+      iframes: [],
       htmlSnapshots: [],
-      cssClasses: [],  // NEW: Track CSS class combinations
-      elementsByClass: {}  // NEW: Map of class → elements
+      cssClasses: [],
+      elementsByClass: {},
+      pageHTML: ''
     };
     
-    // Look for trace.json which contains the actions and snapshots
-    const traceEntry = entries.find(e => e.entryName === 'trace.json' || e.entryName.endsWith('trace.json'));
+    // ENHANCED: Try new format first (.trace files with frame-snapshots)
+    let htmlSnapshots = [];
+    
+    // CRITICAL FIX: Prioritize 0-trace.trace (contains DOM snapshots) over test.trace (metadata only)
+    let traceEntry = entries.find(e => e.entryName === '0-trace.trace');
     if (!traceEntry) {
-      if (HEALER_VERBOSE) console.log('📋 trace.json not found in zip');
-      return result;
+      traceEntry = entries.find(e => e.entryName === 'test.trace');
+    }
+    if (!traceEntry) {
+      traceEntry = entries.find(e => 
+        e.entryName.endsWith('.trace') &&
+        !e.entryName.includes('network') &&
+        !e.entryName.includes('stacks')
+      );
     }
     
-    const traceContent = traceEntry.getData().toString('utf8');
-    const traceData = JSON.parse(traceContent);
-    
-    // Extract snapshots that contain DOM state
-    if (traceData.snapshots && Array.isArray(traceData.snapshots)) {
-      for (const snapshot of traceData.snapshots) {
-        if (snapshot.str && snapshot.str.length > 0) {
-          // NEW: Extract all elements with class attributes for class analysis
-          const allElementsWithClass = snapshot.str.matchAll(/<([a-z][a-z0-9-]*)[^>]*class="([^"]*)"[^>]*>/gi);
-          let cssClassCount = 0;
-          for (const match of allElementsWithClass) {
-            const tagName = match[1];
-            const classStr = match[2]?.trim();
-            if (classStr) {
-              const classes = classStr.split(/\s+/);
-              const classKey = classes.join('.');
-              if (!result.elementsByClass[classKey]) {
-                result.elementsByClass[classKey] = { count: 0, tags: new Set() };
-              }
-              result.elementsByClass[classKey].count++;
-              result.elementsByClass[classKey].tags.add(tagName);
-              
-              if (!result.cssClasses.includes(classKey)) {
-                result.cssClasses.push(classKey);
-                cssClassCount++;
-              }
-            }
-          }
-          if (HEALER_VERBOSE && cssClassCount > 0) {
-            console.log(`   📦 CSS classes extracted from snapshot: ${cssClassCount} unique combinations`);
-          }
-          
-          // Extract button text from HTML, including nested tags and aria-label fallbacks
-          const buttonMatches = snapshot.str.matchAll(/<button([^>]*)>([\s\S]*?)<\/button>/gi);
-          for (const match of buttonMatches) {
-            const attrs = match[1];
-            const innerHtml = match[2] || '';
-            const testIdMatch = attrs.match(/data-testid="([^"]*)"/i);
-            const classMatch = attrs.match(/class="([^"]*)"/i);
-            const ariaLabelMatch = attrs.match(/aria-label="([^"]*)"/i);
-
-            const testId = testIdMatch ? testIdMatch[1] : null;
-            const buttonClass = classMatch ? classMatch[1] : null;
-            let text = innerHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-            if (!text && ariaLabelMatch) {
-              text = ariaLabelMatch[1].trim();
-            }
-
-            if (text) {
-              result.buttons.push({
-                text,
-                testId,
-                classes: buttonClass ? buttonClass.split(/\s+/) : [],
-                html: match[0]
-              });
-            }
-          }
-          
-          // Extract input fields
-          const inputMatches = snapshot.str.matchAll(/<input[^>]*(?:placeholder="([^"]*)")?(?:aria-label="([^"]*)")?[^>]*>/gi);
-          for (const match of inputMatches) {
-            const placeholder = match[1];
-            const ariaLabel = match[2];
-            result.inputs.push({
-              placeholder: placeholder || null,
-              ariaLabel: ariaLabel || null
-            });
-          }
-          
-          // Extract dialog information
-          const dialogMatches = snapshot.str.matchAll(/<(?:dialog|div[^>]*role="dialog")[^>]*>[\s\S]*?<\/(?:dialog|div)>/gi);
-          for (const match of dialogMatches) {
-            const dialogText = match[0].match(/>([^<]+)</g);
-            if (dialogText) {
-              result.dialogs.push({
-                content: dialogText.map(t => t.replace(/[><]/g, '')).join(' '),
-                fullHtml: match[0].substring(0, 500) // First 500 chars
-              });
-            }
-          }
-          
-          // NEW: Extract iframe elements with title, src, name attributes
-          const iframeMatches = snapshot.str.matchAll(/<iframe[^>]*>/gi);
-          for (const match of iframeMatches) {
-            const attrs = match[0];
-            const titleMatch = attrs.match(/title="([^"]*)"/i);
-            const srcMatch = attrs.match(/src="([^"]*)"/i);
-            const nameMatch = attrs.match(/name="([^"]*)"/i);
-            const dataTestIdMatch = attrs.match(/data-testid="([^"]*)"/i);
-            
-            const title = titleMatch ? titleMatch[1] : null;
-            const src = srcMatch ? srcMatch[1] : null;
-            const name = nameMatch ? nameMatch[1] : null;
-            const dataTestId = dataTestIdMatch ? dataTestIdMatch[1] : null;
-            
-            if (title || src || name || dataTestId) {
-              result.iframes.push({
-                title,
-                src,
-                name,
-                dataTestId,
-                selector: title ? `iframe[title="${title}"]` : 
-                         dataTestId ? `iframe[data-testid="${dataTestId}"]` :
-                         name ? `iframe[name="${name}"]` :
-                         src ? `iframe[src*="${src.split('/').pop()}"]` : 'iframe',
-                html: match[0]
-              });
-            }
-          }
-          
-          if (HEALER_VERBOSE && result.iframes.length > 0) {
-            console.log(`   🎬 Extracted ${result.iframes.length} iframe(s) from trace`);
-            result.iframes.forEach(iframe => {
-              console.log(`      - ${iframe.selector}`);
-            });
-          }
-          
-          result.htmlSnapshots.push(snapshot.str);
+    if (traceEntry) {
+      if (HEALER_VERBOSE) console.log(`📋 Found new-format trace file: ${traceEntry.entryName}`);
+      
+      const traceContent = traceEntry.getData().toString('utf8');
+      
+      // CRITICAL FIX: Parse multi-line JSON objects from trace file
+      // Traces can have JSON objects split across multiple lines for readability
+      // Strategy: accumulate text, count braces at character level, parse when balanced
+      let currentObject = '';
+      let braceCount = 0;
+      let bracketCount = 0;
+      let inString = false;
+      let escapeNext = false;
+      
+      for (let i = 0; i < traceContent.length; i++) {
+        const char = traceContent[i];
+        currentObject += char;
+        
+        // Handle string escaping
+        if (escapeNext) {
+          escapeNext = false;
+          continue;
         }
+        if (char === '\\') {
+          escapeNext = true;
+          continue;
+        }
+        
+        // Track if we're inside a string
+        if (char === '"') {
+          inString = !inString;
+          continue;
+        }
+        
+        // Only count braces/brackets outside of strings
+        if (!inString) {
+          if (char === '{') braceCount++;
+          if (char === '}') braceCount--;
+          if (char === '[') bracketCount++;
+          if (char === ']') bracketCount--;
+        }
+        
+        // When we have a complete object (all braces/brackets balanced and just closed a brace)
+        if (braceCount === 0 && bracketCount === 0 && char === '}') {
+          try {
+            const record = JSON.parse(currentObject);
+            
+            // Extract frame-snapshots which contain DOM state
+            if (record.type === 'frame-snapshot' && record.snapshot && record.snapshot.html) {
+              const htmlArray = record.snapshot.html;
+              const htmlString = arrayHtmlToString(htmlArray);
+              if (htmlString && htmlString.length > 0) {
+                htmlSnapshots.push(htmlString);
+              }
+            }
+          } catch (parseErr) {
+            // Skip objects that fail to parse
+          }
+          currentObject = ''; // Reset for next object
+        }
+      }
+      
+      if (htmlSnapshots.length === 0) {
+        if (HEALER_VERBOSE) console.log(`⚠️  No frame-snapshots found in ${traceEntry.entryName}, trace may be incomplete`);
+        
+        // CRITICAL FIX: Try alternative .trace files if the first one didn't work
+        if (traceEntry.entryName === 'test.trace') {
+          const alt0Trace = entries.find(e => e.entryName === '0-trace.trace');
+          if (alt0Trace) {
+            if (HEALER_VERBOSE) console.log(`🔄 Trying alternative trace file: ${alt0Trace.entryName}`);
+            
+            const altContent = alt0Trace.getData().toString('utf8');
+            let currentObject = '';
+            let braceCount = 0;
+            let bracketCount = 0;
+            let inString = false;
+            let escapeNext = false;
+            
+            for (let i = 0; i < altContent.length; i++) {
+              const char = altContent[i];
+              currentObject += char;
+              
+              if (escapeNext) {
+                escapeNext = false;
+                continue;
+              }
+              if (char === '\\') {
+                escapeNext = true;
+                continue;
+              }
+              
+              if (char === '"') {
+                inString = !inString;
+                continue;
+              }
+              
+              if (!inString) {
+                if (char === '{') braceCount++;
+                if (char === '}') braceCount--;
+                if (char === '[') bracketCount++;
+                if (char === ']') bracketCount--;
+              }
+              
+              if (braceCount === 0 && bracketCount === 0 && char === '}') {
+                try {
+                  const record = JSON.parse(currentObject);
+                  if (record.type === 'frame-snapshot' && record.snapshot && record.snapshot.html) {
+                    const htmlArray = record.snapshot.html;
+                    const htmlString = arrayHtmlToString(htmlArray);
+                    if (htmlString && htmlString.length > 0) {
+                      htmlSnapshots.push(htmlString);
+                    }
+                  }
+                } catch (parseErr) {
+                  // Skip objects that fail to parse
+                }
+                currentObject = '';
+              }
+            }
+            
+            if (htmlSnapshots.length > 0 && HEALER_VERBOSE) {
+              console.log(`✅ Found ${htmlSnapshots.length} frame-snapshots in ${alt0Trace.entryName}`);
+            }
+          }
+        }
+      }
+    }
+    
+    // Fallback: try old format (trace.json)
+    if (htmlSnapshots.length === 0) {
+      if (HEALER_VERBOSE) console.log(`📋 New format trace not found, trying legacy trace.json format...`);
+      
+      const legacyTraceEntry = entries.find(e => e.entryName === 'trace.json' || e.entryName.endsWith('trace.json'));
+      if (legacyTraceEntry) {
+        const legacyContent = legacyTraceEntry.getData().toString('utf8');
+        let traceData;
+        try {
+          traceData = JSON.parse(legacyContent);
+          
+          if (traceData.snapshots && Array.isArray(traceData.snapshots)) {
+            for (const snapshot of traceData.snapshots) {
+              if (snapshot.str && snapshot.str.length > 0) {
+                htmlSnapshots.push(snapshot.str);
+              }
+            }
+          }
+        } catch (parseErr) {
+          // Unable to parse legacy format either
+        }
+      }
+    }
+    
+    // If still no snapshots, provide helpful diagnostic
+    if (htmlSnapshots.length === 0) {
+      if (HEALER_VERBOSE) {
+        const fileList = entries.map(e => e.entryName).filter(n => !n.startsWith('resources/'));
+        console.log(`⚠️  No trace data found. Available files: ${fileList.join(', ') || 'none'}`);
+      }
+      throw new Error('No trace snapshots found - trace.zip may be incomplete. Ensure trace: "on-first-retry" is set in playwright.config.ts and tests are actually running');
+    }
+    
+    // Process all collected HTML snapshots
+    for (const htmlString of htmlSnapshots) {
+      // Store the HTML snapshot for later analysis
+      result.htmlSnapshots.push(htmlString);
+      // Use the last snapshot as the page state (most recent)
+      result.pageHTML = htmlString;
+      
+      // Extract CSS classes
+      const allElementsWithClass = htmlString.matchAll(/<([a-z][a-z0-9-]*)[^>]*class="([^"]*)"[^>]*>/gi);
+      let cssClassCount = 0;
+      for (const match of allElementsWithClass) {
+        const tagName = match[1];
+        const classStr = match[2]?.trim();
+        if (classStr) {
+          const classes = classStr.split(/\s+/);
+          const classKey = classes.join('.');
+          if (!result.elementsByClass[classKey]) {
+            result.elementsByClass[classKey] = { count: 0, tags: new Set() };
+          }
+          result.elementsByClass[classKey].count++;
+          result.elementsByClass[classKey].tags.add(tagName);
+          
+          if (!result.cssClasses.includes(classKey)) {
+            result.cssClasses.push(classKey);
+            cssClassCount++;
+          }
+        }
+      }
+      if (HEALER_VERBOSE && cssClassCount > 0) {
+        console.log(`   📦 CSS classes extracted from snapshot: ${cssClassCount} unique combinations`);
+      }
+      
+      // Extract button text from HTML
+      const buttonMatches = htmlString.matchAll(/<button([^>]*)>([\s\S]*?)<\/button>/gi);
+      for (const match of buttonMatches) {
+        const attrs = match[1];
+        const innerHtml = match[2] || '';
+        const testIdMatch = attrs.match(/data-testid="([^"]*)"/i);
+        const classMatch = attrs.match(/class="([^"]*)"/i);
+        const ariaLabelMatch = attrs.match(/aria-label="([^"]*)"/i);
+
+        const testId = testIdMatch ? testIdMatch[1] : null;
+        const buttonClass = classMatch ? classMatch[1] : null;
+        let text = innerHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+        if (!text && ariaLabelMatch) {
+          text = ariaLabelMatch[1].trim();
+        }
+
+        if (text) {
+          result.buttons.push({
+            text,
+            testId,
+            classes: buttonClass ? buttonClass.split(/\s+/) : [],
+            html: match[0]
+          });
+        }
+      }
+      
+      // Extract input fields
+      const inputMatches = htmlString.matchAll(/<input[^>]*(?:placeholder="([^"]*)")?(?:aria-label="([^"]*)")?[^>]*>/gi);
+      for (const match of inputMatches) {
+        const placeholder = match[1];
+        const ariaLabel = match[2];
+        result.inputs.push({
+          placeholder: placeholder || null,
+          ariaLabel: ariaLabel || null
+        });
+      }
+      
+      // Extract dialog information
+      const dialogMatches = htmlString.matchAll(/<(?:dialog|div[^>]*role="dialog")[^>]*>[\s\S]*?<\/(?:dialog|div)>/gi);
+      for (const match of dialogMatches) {
+        const dialogText = match[0].match(/>([^<]+)</g);
+        if (dialogText) {
+          result.dialogs.push({
+            content: dialogText.map(t => t.replace(/[><]/g, '')).join(' '),
+            fullHtml: match[0].substring(0, 500)
+          });
+        }
+      }
+      
+      // Extract iframe elements
+      const iframeMatches = htmlString.matchAll(/<iframe[^>]*>/gi);
+      for (const match of iframeMatches) {
+        const attrs = match[0];
+        const titleMatch = attrs.match(/title="([^"]*)"/i);
+        const srcMatch = attrs.match(/src="([^"]*)"/i);
+        const nameMatch = attrs.match(/name="([^"]*)"/i);
+        const dataTestIdMatch = attrs.match(/data-testid="([^"]*)"/i);
+        
+        const title = titleMatch ? titleMatch[1] : null;
+        const src = srcMatch ? srcMatch[1] : null;
+        const name = nameMatch ? nameMatch[1] : null;
+        const dataTestId = dataTestIdMatch ? dataTestIdMatch[1] : null;
+        
+        if (title || src || name || dataTestId) {
+          result.iframes.push({
+            title,
+            src,
+            name,
+            dataTestId,
+            selector: title ? `iframe[title="${title}"]` : 
+                     dataTestId ? `iframe[data-testid="${dataTestId}"]` :
+                     name ? `iframe[name="${name}"]` :
+                     src ? `iframe[src*="${src.split('/').pop()}"]` : 'iframe',
+            html: match[0]
+          });
+        }
+      }
+      
+      if (HEALER_VERBOSE && result.iframes.length > 0) {
+        console.log(`   🎬 Extracted ${result.iframes.length} iframe(s) from trace`);
+        result.iframes.forEach(iframe => {
+          console.log(`      - ${iframe.selector}`);
+        });
       }
     }
     
@@ -3378,6 +3676,7 @@ function auditSourceCodeAccess(eventType, filePath, details = {}) {
 
 /**
  * Sanitize sensitive data from logs
+ * FIXED: Added try-catch to prevent crashes from malformed JSON
  */
 function sanitizeForLogging(data) {
   if (!data || typeof data !== 'object') return data;
@@ -3389,12 +3688,18 @@ function sanitizeForLogging(data) {
     /https?:\/\/[^@]*@/gi
   ];
 
-  let sanitized = JSON.stringify(data);
-  for (const pattern of sensitivePatterns) {
-    sanitized = sanitized.replace(pattern, '[REDACTED]');
+  try {
+    let sanitized = JSON.stringify(data);
+    for (const pattern of sensitivePatterns) {
+      sanitized = sanitized.replace(pattern, '[REDACTED]');
+    }
+    return JSON.parse(sanitized);
+  } catch (err) {
+    if (HEALER_VERBOSE) {
+      console.warn(`⚠️  Failed to sanitize data: ${err.message}. Returning original data.`);
+    }
+    return data;
   }
-
-  return JSON.parse(sanitized);
 }
 
 /**
@@ -3467,6 +3772,58 @@ Examples of corrections:
 
 **RULE**: Always use labels that exist in the source code list above. Never create new label names.
 `;
+}
+
+/**
+ * Build DOM snapshot context from trace data for accurate analysis
+ * ENHANCED: Provides actual page HTML state at test failure for better diagnosis
+ */
+function buildDOMSnapshotContext(traceElements) {
+  if (!traceElements || !traceElements.pageHTML) {
+    return '';
+  }
+
+  let context = '\n## 📸 ACTUAL PAGE DOM SNAPSHOT FROM TRACE\n\n';
+  context += '**Exact HTML state at moment of test failure:**\n';
+  context += '```html\n';
+  
+  // Extract a meaningful portion of the HTML
+  let html = traceElements.pageHTML;
+  
+  // Try to extract just the body content
+  const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+  if (bodyMatch) {
+    html = bodyMatch[1];
+  }
+  
+  // Limit to first 1500 characters
+  if (html.length > 1500) {
+    html = html.substring(0, 1500) + '... [HTML truncated]';
+  }
+  
+  context += html.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  context += '\n```\n';
+  
+  // Add extracted elements summary
+  context += '\n### UI Elements Detected at Test Failure:\n';
+  
+  if (traceElements.buttons && traceElements.buttons.length > 0) {
+    context += '\n**Buttons Found (' + traceElements.buttons.length + '):**\n';
+    traceElements.buttons.slice(0, 15).forEach(btn => {
+      context += '- "' + btn.text + '"' + (btn.testId ? ' [data-testid=' + btn.testId + ']' : '') + '\n';
+    });
+  }
+  
+  if (traceElements.inputs && traceElements.inputs.length > 0) {
+    context += '\n**Form Inputs Found (' + traceElements.inputs.length + '):**\n';
+    traceElements.inputs.slice(0, 10).forEach(inp => {
+      context += '- ' + (inp.placeholder ? '[placeholder: ' + inp.placeholder + ']' : '') + '\n';
+    });
+  }
+  
+  context += '\n**CRITICAL:** Test selectors must match these actual DOM elements.\n';
+  
+  return context;
 }
 
 /**
@@ -3581,18 +3938,28 @@ function generateAnalysisPrompt(testInfo, testCode) {
     uiElementsFromSource = extractUIElementsFromSourceCode(componentPath);
   }
 
-  let traceElements = { buttons: [], inputs: [], dialogs: [], htmlSnapshots: [], cssClasses: [] };
+  let traceElements = { buttons: [], inputs: [], dialogs: [], htmlSnapshots: [], cssClasses: [], pageHTML: '' };
   const tracePath = findTraceFileForTest(testInfo.file || 'test');
-  if (tracePath) {
-    console.log('🔍 Analyzing Playwright trace for element information...');
-    traceElements = extractElementsFromTrace(tracePath);
-    console.log(`📋 Trace analysis results: ${traceElements.buttons.length} buttons, ${traceElements.inputs.length} inputs, ${traceElements.dialogs.length} dialogs extracted.`);
-    // CRITICAL FIX: Log extracted button details for debugging
-    if (HEALER_VERBOSE && traceElements.buttons.length > 0) {
-      console.log(`AI Log - Buttons extracted from trace: ${traceElements.buttons.map(b => `"${b.text}"`).join(', ')}`);
-    }
+  if (!tracePath) {
+    console.error('❌ TRACE FILE REQUIRED: No trace.zip found for test analysis');
+    console.error('   Ensure trace: "on-first-retry" is set in playwright.config.ts');
+    // Continue anyway for backward compatibility, but mark as requiring trace
   } else {
-    console.log('⚠️  Could not find trace file for test analysis');
+    console.log('📋 Found trace file - Extracting DOM snapshot for analysis...');
+    try {
+      traceElements = extractElementsFromTrace(tracePath);
+      console.log(`✅ Trace analysis: ${traceElements.buttons.length} buttons, ${traceElements.inputs.length} inputs, ${traceElements.dialogs.length} dialogs extracted from DOM`);
+      if (HEALER_VERBOSE && traceElements.buttons.length > 0) {
+        console.log(`   Buttons: ${traceElements.buttons.map(b => `"${b.text}"`).join(', ')}`);
+      }
+      if (HEALER_VERBOSE && traceElements.pageHTML) {
+        console.log(`   Page HTML snapshot: ${traceElements.pageHTML.substring(0, 200)}...`);
+      }
+    } catch (traceErr) {
+      console.error(`❌ Trace extraction failed: ${traceErr.message}`);
+      console.error('   This is critical for accurate test analysis. Trace.json is required.');
+      // Continue with empty trace data
+    }
   }
 
   const codeSizeCheck = validateTestCodeSize(testCode, 50000);
@@ -3645,6 +4012,7 @@ function generateAnalysisPrompt(testInfo, testCode) {
   }
 
   const uiElementContext = buildUIElementContext(componentPath, uiElementsFromSource, Array.from(sanitizedTestCode.matchAll(UI_ELEMENT_PATTERNS.testLookupLabels)).map(m => m[1]).filter(Boolean));
+  const domSnapshotContext = buildDOMSnapshotContext(traceElements);  // ENHANCED: Add actual page DOM state
   if (HEALER_VERBOSE && uiElementContext) {
     console.log('AI Log - UI Element Context:', uiElementContext);
   }
@@ -3699,6 +4067,7 @@ function generateAnalysisPrompt(testInfo, testCode) {
 5. **Fixed Code**: Provide COMPLETE corrected test code (if UPDATE_TEST or UPDATE_SELECTOR or UPDATE_TEXT or ARCHITECTURAL_FIX)`,
 
     uiElementContext,
+    domSnapshotContext,  // ENHANCED: Add actual page DOM state from trace
     selectorGuidance,
     buttonTextGuidance,
     generateIframeGuidance(traceElements, testCode),  // NEW: Add iframe guidance
@@ -3796,12 +4165,19 @@ async function analyzeWithGemini(testInfo, testCode, classChanges = null, retryC
       }
     });
     
-    const timeoutPromise = new Promise((_, reject) => {
+    // FIXED: Use Promise.allSettled to distinguish timeout from success
+    const [analysisResult, timeoutResult] = await Promise.allSettled([analysisPromise, new Promise((_, reject) => {
       setTimeout(() => reject(new Error(`Gemini API timeout after ${HEALER_API_TIMEOUT}ms`)), HEALER_API_TIMEOUT);
-    });
+    })]);
     
-    const result = await Promise.race([analysisPromise, timeoutPromise]);
-    return result.candidates[0]?.content?.parts[0]?.text || null;
+    // Check which promise completed (timeout or analysis)
+    if (analysisResult.status === 'fulfilled') {
+      const result = analysisResult.value;
+      return result.candidates?.[0]?.content?.parts?.[0]?.text || null;
+    } else if (analysisResult.status === 'rejected') {
+      throw new Error(`API analysis failed: ${analysisResult.reason?.message || 'Unknown error'}`);
+    }
+    return null;
   } catch (err) {
     console.error('❌ Gemini API error:', err.message);
     
@@ -4388,6 +4764,10 @@ async function heal() {
   const options = parseArgs();
   // Update HEALER_VERBOSE based on CLI --verbose flag
   if (options.verbose) HEALER_VERBOSE = true;
+  
+  // FIXED: Initialize global state for clean healing session
+  initializeHealingState();
+  
   const startTime = Date.now();
   const healingResults = {
     totalTests: 0,
@@ -4723,5 +5103,7 @@ heal().catch(err => {
   if (HEALER_VERBOSE) {
     console.error(err.stack);
   }
+  // FIXED: Cleanup resources before exit
+  cleanupBeforeExit();
   process.exit(1);
 });

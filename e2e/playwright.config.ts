@@ -14,6 +14,7 @@ declare const process: any;
  * See https://playwright.dev/docs/test-configuration.
  */
 export default defineConfig({
+  
   testDir: './tests',
   testMatch: '**/*.spec.ts',
   testIgnore: ['**/node_modules/**', '**/.{idea,git,cache,output,temp}/**'],
@@ -35,9 +36,8 @@ export default defineConfig({
   use: {
     /* Base URL to use in actions like `await page.goto('')`. */
     baseURL: 'http://localhost:3000',
-
     /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
-    trace: 'retain-on-failure',
+    trace: 'on',
   },
 
   /* Configure projects for major browsers */
