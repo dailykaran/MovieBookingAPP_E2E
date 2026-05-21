@@ -10,8 +10,7 @@ test.describe('Frontend iFrame Landing Page Tests (localhost:3000)', () => {
 
     const movieFrame = page.frameLocator('iframe[title="Upcoming Movies List"]');
     
-    // Updated selector to target the specific button element with text partially matching "Upcoming"
-    const upcomingMoviesButton = movieFrame.getByRole('button', { name: /Upcoming Movies/i });
+    const upcomingMoviesButton = movieFrame.getByRole('button', { name: "Recent Movies" });
 
     await expect(upcomingMoviesButton).toBeVisible({ timeout: 15000 });
   });

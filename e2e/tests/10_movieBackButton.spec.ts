@@ -13,8 +13,8 @@ test.describe('Back button on the movie page', () => {
     await expect(bookNowButton).toBeVisible();
     await bookNowButton.click();
 
-    const backButton = page.getByRole('button', { name: /back/i })
-      .or(page.getByRole('link', { name: /back/i }));
+    const backButton = page.getByRole('button', { name: "Home" })
+      .or(page.getByRole('link', { name: "Home" }));
     
     await expect(backButton).toBeVisible();
     

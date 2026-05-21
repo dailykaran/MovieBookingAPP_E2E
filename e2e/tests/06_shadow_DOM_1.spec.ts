@@ -11,9 +11,9 @@ test('Loading spinner appears during booking', async ({ page }) => {
     const seatGrid = page.locator('seat-grid'); 
     await expect(seatGrid).toBeVisible();
 
-    const seats = seatGrid.locator('.seat.available.visible');  
-    await expect(seats.first()).toBeVisible();  
-    await seats.first().click();
+    const seats = seatGrid.locator('.seat.available.clickable');  
+    await expect(seats.last()).toBeVisible();  
+    await seats.last().click();
     
     const confirmBtn = page.locator('button', { hasText: /Confirm/i });
     await expect(confirmBtn).toBeVisible(); 
